@@ -1,0 +1,32 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+
+# CDK
+cdk.out/
+*.cdk.staging/
+
+# Env & secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/public.key
+
+# Local
+.DS_Store
+.vscode/
+.idea/
+*.log
+npm-debug.log*
+.serverless/
+tmp/
+scratch/
+
+# Local test corpora (real customer docs should not live in git)
+data/raw/
+data/processed/
