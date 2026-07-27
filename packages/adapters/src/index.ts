@@ -15,3 +15,17 @@ export {
   cosineSimilarity,
   type InMemoryVectorStore,
 } from "./memory/vector-store.js";
+export {
+  createStorefrontClient,
+  type StorefrontClient,
+  type StorefrontClientConfig,
+} from "./shopify/storefront-client.js";
+export {
+  createShopifyProductCatalog,
+  type ShopifyProductCatalogConfig,
+} from "./shopify/product-catalog.js";
+export {
+  parseAttributes,
+  productEmbeddingText,
+  type ParsedAttributes,
+} from "./shopify/attributes.js";
