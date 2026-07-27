@@ -64,7 +64,11 @@ The trust policy is where the security lives:
   "Version": "2012-10-17",
   "Statement": [{
     "Effect": "Allow",
-    "Principal": { "Federated": "arn:aws:iam::984844735070:oidc-provider/token.actions.githubusercontent.com" },
+    // Replace <AWS_ACCOUNT_ID> with your account ID (`aws sts get-caller-identity`).
+    // Kept out of version control here because this repo is public — account IDs
+    // aren't secret, but they're useful for targeted phishing and cross-account
+    // enumeration, so there's no reason to publish one.
+    "Principal": { "Federated": "arn:aws:iam::<AWS_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com" },
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": {
