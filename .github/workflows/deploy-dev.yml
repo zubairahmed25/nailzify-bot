@@ -1,0 +1,94 @@
+name: Deploy — dev
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false # never cancel a deploy mid-flight
+
+env:
+  NODE_VERSION: "22"
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    name: Deploy to dev
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      id-token: write # OIDC — no long-lived AWS keys anywhere
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Assume AWS role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-deploy-dev
+
+      - name: Build widget
+        run: npm run build --workspace=web/widget
+
+      # Stateful stacks first — API and ingestion depend on table/bucket ARNs.
+      # See docs/09-deployment.md §9.7.
+      - name: Deploy infrastructure
+        run: npx cdk deploy --all --require-approval never --outputs-file cdk-outputs.json
+        working-directory: infra
+        env:
+          NAILZIFY_ENV: dev
+
+      - name: Smoke test
+        run: npm run test:smoke -- --env dev
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Dev deploy: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  generation-eval:
+    name: Generation quality (LLM judge)
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-generation-eval
+
+      # Costs tokens and takes minutes — post-deploy rather than per-PR.
+      # Reports groundedness and correct-abstention rate. docs/10-operations.md §10.4.
+      - name: Run generation eval
+        run: npm run eval:generation -- --env dev --min-groundedness 0.95
+
+      - name: Publish results
+        if: always()
+        run: cat eval-results.md >> "$GITHUB_STEP_SUMMARY"

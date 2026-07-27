@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege by default. Jobs that need AWS opt in to id-token individually.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  quality:
+    name: Lint, typecheck, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit -- --coverage
+
+      # The domain layer must never import infrastructure. See docs/07-backend.md.
+      # ESLint enforces this too; this grep survives an eslint-disable.
+      - name: Enforce architecture boundaries
+        run: |
+          if grep -rnE "@aws-sdk|@pinecone-database|aws-lambda|@shopify/" \
+               packages/core/src --include="*.ts" ; then
+            echo "::error::packages/core must not import infrastructure — see docs/07-backend.md §7.9"
+            exit 1
+          fi
+          echo "Domain layer is clean."
+
+  security:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks needs history
+
+      - name: Scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  widget:
+    name: Widget build + size budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build widget
+        run: npm run build --workspace=web/widget
+
+      # The widget loads on every storefront page. Without a hard gate this grows
+      # monotonically and the merchant's store gets slower. See docs/08-frontend.md §8.3.
+      - name: Bundle size budget
+        run: |
+          BUDGET=25600
+          FILE=web/widget/dist/nailzify-widget.js
+          SIZE=$(gzip -c "$FILE" | wc -c | tr -d ' ')
+          echo "Bundle: ${SIZE} bytes gzipped (budget ${BUDGET})"
+          echo "### Widget bundle: ${SIZE} B gzipped / ${BUDGET} B budget" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$SIZE" -gt "$BUDGET" ]; then
+            echo "::error file=${FILE}::Bundle ${SIZE}B exceeds ${BUDGET}B budget"
+            exit 1
+          fi
+
+  infrastructure:
+    name: CDK synth + cdk-nag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # synth needs no AWS credentials — it renders CloudFormation locally.
+      # cdk-nag then runs security rules over the synthesized template.
+      - name: Synthesize (runs cdk-nag aspects)
+        run: npx cdk synth --all --quiet
+        working-directory: infra
+        env:
+          CDK_DEFAULT_ACCOUNT: "000000000000"
+          CDK_DEFAULT_REGION: us-east-1
+
+  retrieval-eval:
+    name: Retrieval quality gate
+    runs-on: ubuntu-latest
+    # Only on PRs touching retrieval-relevant code — this job needs AWS + Pinecone.
+    if: github.event_name == 'pull_request'
+    permissions:
+      id-token: write # OIDC
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Assume AWS role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: gha-retrieval-eval
+
+      # Deterministic: embed the golden questions, search, compare against expected
+      # source chunks. No generation, so no LLM cost and no flakiness.
+      # See docs/07-backend.md §7.8.
+      - name: Run retrieval eval
+        run: npm run eval:retrieval -- --min-recall 0.90 --min-precision 0.75

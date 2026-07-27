@@ -1,0 +1,104 @@
+name: Deploy — production
+
+# Manual only. A customer-facing bot talking to real shoppers gets a human in the
+# loop until the eval suite has earned enough trust to remove it.
+# See docs/11-cicd.md §11.6.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm production release'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  AWS_REGION: us-east-1
+
+jobs:
+  guard:
+    name: Confirm intent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        if: inputs.confirm != 'deploy'
+        run: |
+          echo "::error::Confirmation string did not match. Type 'deploy' to proceed."
+          exit 1
+
+  verify:
+    name: Re-run quality gates
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+
+  deploy:
+    name: Deploy to production
+    needs: verify
+    runs-on: ubuntu-latest
+    # GitHub Environment with required reviewers. The prod OIDC role's trust
+    # policy is scoped to `environment:production`, so this is enforced by AWS
+    # as well as by GitHub. See docs/11-cicd.md §11.2.
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Assume production AWS role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-deploy-prod
+
+      - name: Build widget
+        run: npm run build --workspace=web/widget
+
+      - name: Diff against live infrastructure
+        run: npx cdk diff --all || true
+        working-directory: infra
+        env:
+          NAILZIFY_ENV: prod
+
+      # CodeDeploy shifts 10% of traffic for 5 minutes and auto-rolls-back if the
+      # error-rate or p99-latency alarm fires. docs/09-deployment.md §9.6.
+      - name: Deploy (canary 10% / 5 min)
+        run: npx cdk deploy --all --require-approval never
+        working-directory: infra
+        env:
+          NAILZIFY_ENV: prod
+
+      - name: Smoke test
+        run: npm run test:smoke -- --env prod
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Production deploy: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Actor: @${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
