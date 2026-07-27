@@ -31,14 +31,48 @@ import { effectiveScore, type ScoredChunk } from "./chunk.js";
 
 export interface RetrievalPolicy {
   /**
-   * Minimum effective score for a chunk to be considered usable.
+   * Floor applied to RAW COSINE similarity, when no reranker has run.
    *
-   * TUNE THIS ON YOUR EVAL SET, do not accept the default on faith. Too high and
-   * the bot abstains on questions it could answer (annoying, but visible and
-   * fixable). Too low and it invents answers (silent, and much worse). When
-   * uncertain, err high — see docs/04-retrieval.md §4.4.
+   * ⚠️ MEASURED, NOT GUESSED — and the measurement was a surprise. Against
+   * `cohere.embed-v4:0` at 1024 dimensions on a real Nailzify policy corpus:
+   *
+   *     correct matches      0.184 – 0.590
+   *     off-topic questions  0.147 – 0.174
+   *
+   * Two conclusions, and the second is the important one.
+   *
+   * 1. An earlier hand-picked default of 0.35 would have abstained on four of
+   *    five CORRECT answers. A threshold set by intuition was badly wrong, in
+   *    the direction that looks like a broken bot.
+   *
+   * 2. The weakest correct answer (0.184) and the strongest off-topic one
+   *    (0.174) are 0.01 apart. THERE IS NO THRESHOLD THAT RELIABLY SEPARATES
+   *    THEM. Picking 0.18 would "pass the test" while overfitting to six queries
+   *    on a six-chunk corpus, and it would not survive contact with a real one.
+   *
+   * So this floor is deliberately set low. It is a coarse garbage filter —
+   * catching empty text, dimension bugs, and genuine noise — NOT the precision
+   * gate. Raw cosine from a bi-encoder is simply too compressed to carry an
+   * abstention decision.
+   *
+   * ⚠️ THE ARCHITECTURAL CONSEQUENCE: reranking is not a nice-to-have for the
+   * knowledge plane. It is what makes correct abstention possible at all. A
+   * deployment without a reranker will either answer from weak sources or
+   * abstain on good ones, and no amount of tuning this number fixes that.
    */
-  readonly relevanceFloor: number;
+  readonly cosineFloor: number;
+
+  /**
+   * Floor applied to CROSS-ENCODER rerank scores, when a reranker has run.
+   *
+   * Separate from `cosineFloor` because the two are different distributions and
+   * one threshold cannot serve both. A cross-encoder reads the query and the
+   * document together and emits something much closer to a calibrated relevance
+   * probability, so a meaningful absolute threshold is actually possible here.
+   *
+   * Still calibrate it on your own eval set — this is a starting point.
+   */
+  readonly rerankFloor: number;
 
   /**
    * How many chunks reach the model.
@@ -50,7 +84,7 @@ export interface RetrievalPolicy {
   readonly maxChunks: number;
 
   /**
-   * A margin the TOP result must clear beyond the floor.
+   * A margin the TOP result must clear beyond the applicable floor.
    *
    * Guards a specific failure: several mediocre chunks that all scrape past the
    * floor, none of which actually answers the question. If nothing is clearly
@@ -60,10 +94,19 @@ export interface RetrievalPolicy {
   readonly topResultMargin: number;
 }
 
+/**
+ * Defaults calibrated against `cohere.embed-v4:0` @ 1024d on the Nailzify
+ * corpus. See the note on `cosineFloor` for the measured distribution.
+ *
+ * Re-measure whenever you change the embedding model. Scores from different
+ * models are not comparable, so a floor carried over from one to another is
+ * a number with no meaning.
+ */
 export const DEFAULT_RETRIEVAL_POLICY: RetrievalPolicy = {
-  relevanceFloor: 0.35,
+  cosineFloor: 0.1,
+  rerankFloor: 0.35,
   maxChunks: 4,
-  topResultMargin: 0.1,
+  topResultMargin: 0.02,
 };
 
 /**
@@ -90,13 +133,19 @@ export function applyRetrievalPolicy(
   const ranked = [...results].sort((a, b) => effectiveScore(b) - effectiveScore(a));
   const best = effectiveScore(ranked[0]!);
 
+  // Pick the floor that matches the score distribution we are actually looking
+  // at. Applying a cross-encoder threshold to raw cosine (or vice versa) is
+  // comparing numbers from different scales — the mistake that made the original
+  // hand-picked default abstain on correct answers.
+  const floor = wasReranked(ranked) ? policy.rerankFloor : policy.cosineFloor;
+
   // The top result must be convincingly good, not merely passing.
-  if (best < policy.relevanceFloor + policy.topResultMargin) {
+  if (best < floor + policy.topResultMargin) {
     return { kind: "insufficient", bestScore: best };
   }
 
   const usable = ranked
-    .filter((c) => effectiveScore(c) >= policy.relevanceFloor)
+    .filter((c) => effectiveScore(c) >= floor)
     .slice(0, policy.maxChunks);
 
   // Defensive: unreachable given the check above, but the union makes the
@@ -134,3 +183,14 @@ export function describeOutcome(outcome: RetrievalOutcome): string {
 /** Convenience for metrics — see the AbstentionRate alarm in docs/10-operations.md. */
 export const didAbstain = (outcome: RetrievalOutcome): boolean =>
   outcome.kind === "insufficient";
+
+/**
+ * Did a reranker run over these results?
+ *
+ * Checks the top result rather than requiring all of them, because a reranker
+ * scores whatever slice it was given. If the best candidate carries a rerank
+ * score, we are in the reranked distribution.
+ */
+function wasReranked(ranked: readonly ScoredChunk[]): boolean {
+  return ranked[0]?.rerankScore !== null && ranked[0]?.rerankScore !== undefined;
+}

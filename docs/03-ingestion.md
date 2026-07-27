@@ -225,12 +225,27 @@ The mental model that helps: the model has learned a coordinate system for *mean
 Dimension 400 isn't "nail-related," but the *direction* the vector points encodes topic,
 tone, specificity, and entity all at once.
 
-**Model choice — available in your account:**
+**Model choice — verified against the live API in this account:**
 
 | Model | Dims | Notes |
 |---|---|---|
-| `cohere.embed-v4:0` | 1024 (configurable) | **Chosen.** Supports asymmetric `input_type`; strong retrieval benchmarks; 512-token-ish chunk sweet spot fits our design. |
+| `cohere.embed-v4:0` | **1536 by default**, configurable | **Chosen.** Supports asymmetric `input_type`; strong retrieval benchmarks. |
 | `amazon.titan-embed-text-v2:0` | 256/512/1024 | Cheapest. Configurable dims trade a little accuracy for a lot of storage. Solid fallback. |
+
+> ⚠️ **Cohere v4 returns 1536 dimensions by default, not 1024.** An earlier draft
+> of this document assumed 1024, which would have failed every upsert against a
+> 1024-dimension index with a dimension mismatch.
+>
+> The adapter therefore pins `output_dimension: 1024` explicitly rather than
+> relying on the default. Two reasons: it matches the index, and — more
+> importantly — an explicit value means the adapter's declared `dimensions` and
+> the vectors it actually returns can never drift apart. Cohere v4 uses
+> Matryoshka representations, so truncating to 1024 costs very little retrieval
+> quality while saving ~33% vector storage.
+>
+> **General lesson:** verify wire formats and dimensions against the real API
+> before building on them. A dimension mismatch is a loud failure; a *silently
+> wrong* assumption about response shape is worse.
 | `cohere.embed-multilingual-v3` | 1024 | If you sell internationally and get non-English questions. |
 | `amazon.nova-2-multimodal-embeddings-v1:0` | — | Text *and* images in one space. The Phase 12 image-search unlock. |
 

@@ -192,11 +192,42 @@ single-step quality gain in a RAG system after contextual chunking. The retrieve
 narrow pattern lets you set the vector search's recall generously without paying for the
 precision loss.
 
-**Also apply a relevance floor.** If the top reranked score is below a threshold, return
+> ### ⚠️ Measured: reranking is required, not optional
+>
+> Running the real pipeline (`npx vite-node scripts/verify-retrieval.ts`) against
+> `cohere.embed-v4:0` @ 1024d on a Nailzify policy corpus produced this
+> distribution:
+>
+> | | Cosine score |
+> |---|---|
+> | Correct top-1 retrievals | 0.184 – 0.590 |
+> | Best off-topic match (question not in corpus) | 0.174 |
+>
+> **The weakest correct answer and the strongest wrong one are 0.01 apart.**
+> There is no absolute threshold on raw cosine that reliably separates them —
+> anything that rejects the off-topic result also very nearly rejects a correct
+> one. Raw bi-encoder similarity is too compressed to carry an abstention
+> decision.
+>
+> Two consequences for this design:
+>
+> 1. `cosineFloor` is set low (0.10) and treated as a **garbage filter** — it
+>    catches empty text, dimension bugs, and genuine noise. It is not the
+>    precision gate.
+> 2. The precision gate is `rerankFloor`, applied to cross-encoder scores, which
+>    are far better separated and roughly calibrated. **Deploying the knowledge
+>    plane without a reranker means either answering from weak sources or
+>    abstaining on good ones**, and no amount of tuning the cosine floor fixes it.
+>
+> An earlier version of this doc suggested a hand-picked floor of 0.35. Against
+> real scores that would have abstained on four of five correct answers. The
+> lesson generalizes: **retrieval thresholds are measurements, not judgement
+> calls.** Obtain them from your own corpus and re-measure on any model change.
+
+**Where the floor applies.** If the top score is below the applicable floor, return
 *nothing* and let the model say it doesn't know. Returning four weakly-relevant chunks is
 strictly worse than returning zero — it invites the model to construct an answer from
-material that doesn't contain one. This threshold is one of your most important
-anti-hallucination knobs; tune it on your eval set.
+material that doesn't contain one.
 
 ---
 

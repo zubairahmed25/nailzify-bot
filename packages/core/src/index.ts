@@ -21,6 +21,7 @@ export * from "./domain/conversation/window.js";
 
 // ---- knowledge plane ----
 export * from "./domain/knowledge/chunk.js";
+export * from "./domain/knowledge/chunking.js";
 export * from "./domain/knowledge/retrieval-policy.js";
 
 // ---- catalog plane ----
