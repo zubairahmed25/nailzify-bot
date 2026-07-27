@@ -3,7 +3,13 @@
     "allow": [
       "Bash(npx vite-node *)",
       "Bash(npm run *)",
-      "Bash(npx vitest *)"
+      "Bash(npx vitest *)",
+      "Bash(npm install *)",
+      "Bash(node -e 'console.log\\(\"@anthropic-ai/bedrock-sdk\", require\\(\"@anthropic-ai/bedrock-sdk/package.json\"\\).version\\)')",
+      "Bash(node -e 'const m=require\\(\"@anthropic-ai/bedrock-sdk\"\\); console.log\\(Object.keys\\(m\\).filter\\(k=>/Anthropic|Bedrock/.test\\(k\\)\\).join\\(\", \"\\)\\)')",
+      "Bash(node -e ' *)",
+      "Bash(grep -viE \"experimental|^\\\\s*$\")",
+      "Bash(aws bedrock *)"
     ]
   }
 }

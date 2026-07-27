@@ -68,6 +68,17 @@ export interface Message {
   readonly content: string;
   readonly createdAt: number;
 
+  /**
+   * Tool results this turn carries back to the model.
+   *
+   * User turns only. Added when the LLM adapter revealed the gap: a tool loop
+   * needs to replay the full `tool_use` -> `tool_result` pairing, and a Message
+   * that only held a content string could not express the second half. The API
+   * REQUIRES one result per call — omitting one is a hard 400, not a graceful
+   * degradation.
+   */
+  readonly toolResults?: readonly ToolOutcome[];
+
   /** Assistant turns only — provenance for debugging and audit. */
   readonly toolCalls?: readonly ToolCall[];
   readonly citations?: readonly Citation[];

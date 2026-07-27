@@ -48,7 +48,7 @@ jobs:
       # which fails the build on correct code.
       - name: Enforce architecture boundaries
         run: |
-          FORBIDDEN='(@aws-sdk/|@pinecone-database/|aws-lambda|@shopify/)'
+          FORBIDDEN='(@aws-sdk/|@pinecone-database/|aws-lambda|@shopify/|@anthropic-ai/)'
           if grep -rnE "(from|require\()\s*['\"]${FORBIDDEN}" \
                packages/core/src --include="*.ts" ; then
             echo "::error::packages/core must not import infrastructure — see docs/07-backend.md §7.9"

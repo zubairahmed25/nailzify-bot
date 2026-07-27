@@ -9,6 +9,13 @@
 
 export { createBedrockEmbedder, type BedrockEmbedderConfig } from "./bedrock/embedder.js";
 export { createBedrockReranker, type BedrockRerankerConfig } from "./bedrock/reranker.js";
+export {
+  createBedrockLlmClient,
+  DEFAULT_MODELS,
+  FALLBACK_MODELS,
+  type BedrockLlmConfig,
+  type ModelRoleMap,
+} from "./bedrock/llm-client.js";
 export { createPineconeVectorStore, type PineconeConfig } from "./pinecone/vector-store.js";
 export {
   createInMemoryVectorStore,

@@ -63,13 +63,51 @@ Cost Explorer, and invocation logging drops into CloudWatch/S3 with one config s
 For a store handling customer messages, keeping inference inside the account you already
 audit is a real compliance simplification.
 
-**Model selection.** Confirmed available in your `us-east-1` account:
+> ### ⚠️ Two gates before any Claude model works — both measured
+>
+> **1. Model IDs must be inference profiles, not bare IDs.**
+>
+> ```
+> anthropic.claude-sonnet-4-6      -> ValidationException
+> us.anthropic.claude-sonnet-4-6   -> reaches the model
+> ```
+>
+> Current Claude models on Bedrock require a **cross-region inference profile**.
+> `us.` routes across US regions for capacity; `global.` routes worldwide. The
+> error (`ValidationException`) does not say "use a profile", which makes this
+> the most common Bedrock model-ID mistake.
+>
+> Note the two Bedrock surfaces take **different** ID formats:
+>
+> | Client | Path | Model ID format |
+> |---|---|---|
+> | `AnthropicBedrock` | `InvokeModel` | `us.` / `global.` profile IDs |
+> | `AnthropicBedrockMantle` | Messages endpoint | bare `anthropic.` IDs |
+>
+> Mantle returns 404 for profile-prefixed IDs. Pick one and stay consistent.
+>
+> **2. Listing is not access.** Both `list-foundation-models` and
+> `list-inference-profiles` report models the account **cannot invoke** — the
+> latter even shows them as `ACTIVE`. On this account every Claude model
+> currently fails with one of:
+>
+> - `404 Model use case details have not been submitted for this account` —
+>   cleared by a form in the Bedrock console (Model access → Anthropic use case
+>   details), then ~15 minutes to propagate.
+> - `403 <model> is not available for this account` — a separate per-model
+>   access grant. Claude 5 models sit behind this one.
+>
+> Cohere embed/rerank are unaffected, which is why the retrieval pipeline
+> verified fine while the LLM path did not. **Verify by invoking, never by
+> listing** — run `npx vite-node scripts/verify-llm.ts`.
+
+**Model selection.** Verify each against your account before relying on it:
 
 | Job | Model | Bedrock ID | Price /1M in–out | Why |
 |---|---|---|---|---|
-| Main conversation | Claude Sonnet 5 | `anthropic.claude-sonnet-5` | $3 / $15 | Near-Opus quality on tool use and instruction-following at a third the cost. The default for production chat. |
-| Cheap turns / routing / classification | Claude Haiku 4.5 | `anthropic.claude-haiku-4-5` | $1 / $5 | "Do you ship to Canada?" doesn't need a frontier model. Route simple intents here — see §2.13 cost model. |
-| Hardest reasoning (optional) | Claude Opus 5 | `anthropic.claude-opus-5` | $5 / $25 | Reserve for offline eval-set grading or a complex-recommendation escalation path, not the default. |
+| Main conversation | Claude Sonnet 5 | `us.anthropic.claude-sonnet-5` ⚠️ | $3 / $15 | Near-Opus quality on tool use and instruction-following at a third the cost. The default for production chat. |
+| Cheap turns / routing / classification | Claude Haiku 4.5 | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | $1 / $5 | "Do you ship to Canada?" doesn't need a frontier model. Route simple intents here — see §2.13 cost model. |
+| Hardest reasoning (optional) | Claude Opus 5 | `us.anthropic.claude-opus-5` ⚠️ | $5 / $25 | Reserve for offline eval-set grading or a complex-recommendation escalation path, not the default. |
 | Embeddings | Cohere Embed v4 | `cohere.embed-v4:0` | ~$0.10 / 1M | Strong retrieval quality, supports `input_type` (`search_document` vs `search_query`) which measurably improves recall — see Phase 3. |
 | Embeddings (alt) | Titan Text v2 | `amazon.titan-embed-text-v2:0` | ~$0.02 / 1M | Cheapest; configurable output dimensions (256/512/1024) for storage savings. |
 | Future: image embeddings | Nova 2 Multimodal | `amazon.nova-2-multimodal-embeddings-v1:0` | — | Same vector space for text and images → "find nails like this photo." Phase 12. |
