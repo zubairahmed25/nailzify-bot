@@ -8,6 +8,7 @@
  */
 
 export { createBedrockEmbedder, type BedrockEmbedderConfig } from "./bedrock/embedder.js";
+export { createBedrockReranker, type BedrockRerankerConfig } from "./bedrock/reranker.js";
 export { createPineconeVectorStore, type PineconeConfig } from "./pinecone/vector-store.js";
 export {
   createInMemoryVectorStore,

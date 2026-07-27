@@ -209,20 +209,59 @@ precision loss.
 > one. Raw bi-encoder similarity is too compressed to carry an abstention
 > decision.
 >
-> Two consequences for this design:
+> Adding `cohere.rerank-v3-5:0` and re-measuring the same corpus:
 >
-> 1. `cosineFloor` is set low (0.10) and treated as a **garbage filter** — it
->    catches empty text, dimension bugs, and genuine noise. It is not the
->    precision gate.
-> 2. The precision gate is `rerankFloor`, applied to cross-encoder scores, which
->    are far better separated and roughly calibrated. **Deploying the knowledge
->    plane without a reranker means either answering from weak sources or
->    abstaining on good ones**, and no amount of tuning the cosine floor fixes it.
+> | | Worst correct | Best off-topic | Worst-case separation |
+> |---|---|---|---|
+> | cosine | 0.184 | 0.174 | **1.06×** |
+> | rerank | 0.053 | 0.039 | **1.33×** |
 >
-> An earlier version of this doc suggested a hand-picked floor of 0.35. Against
-> real scores that would have abstained on four of five correct answers. The
-> lesson generalizes: **retrieval thresholds are measurements, not judgement
-> calls.** Obtain them from your own corpus and re-measure on any model change.
+> Reranking helps, and the worst-case number understates it: **four of five
+> correct answers rerank to 0.207+, which is 5–19× above the off-topic ceiling.**
+> Reranking also *improved a top-1 result* — an "opened packet" question moved
+> from the general Eligibility section to the more specific Hygiene Exclusions
+> one, a distinction cosine missed.
+>
+> But it is **not a silver bullet.** One query — "will I be charged extra fees at
+> the border?" against source text reading "customs duties or import taxes" —
+> scores 0.053, only 1.36× above noise. When the question's vocabulary genuinely
+> diverges from the source, both the bi-encoder and the cross-encoder struggle.
+>
+> Three consequences for this design:
+>
+> 1. `cosineFloor` (0.10) is a **garbage filter** — empty text, dimension bugs,
+>    genuine noise. Not the precision gate.
+> 2. `rerankFloor` (0.045) is the precision gate. Note it is numerically *lower*
+>    than the cosine floor: the two are different scales, and neither is
+>    "stricter" than the other.
+> 3. The residual gap on hard queries is why the system prompt's grounding
+>    instruction (§4.7) is a **second layer, not redundancy.** The model reading
+>    the retrieved chunks can see that customs-duty text doesn't answer a
+>    question about bitcoin. Threshold and instruction are defence in depth;
+>    neither is sufficient alone.
+>
+> **Two hand-picked defaults, both wrong.** 0.35 for cosine would have abstained
+> on four of five correct answers; 0.35 for rerank on three of five.
+> Cross-encoder scores in particular are not percentages and do not read like
+> confidence. **Retrieval thresholds are measurements, not judgement calls.**
+>
+> ⚠️ And treat the numbers above as a *method*, not an answer: six chunks and
+> five questions is a demonstration, and the current floor is fitted to a single
+> hard query. Re-derive on your real corpus with 30–50 questions from the support
+> inbox before trusting it.
+
+> ### Operational note: rerank throughput is tight
+>
+> On-demand `cohere.rerank-v3-5:0` returned `ThrottlingException` after **three
+> sequential calls** during verification. Not a burst — three requests.
+>
+> Reranking sits in the chat request path, so a throttle is customer-facing
+> latency rather than a background retry. Plan for it: the adapter defaults to 5
+> SDK retry attempts with exponential backoff, and the caller should **degrade to
+> cosine ordering with a metric** rather than failing the turn. If reranking every
+> turn proves unaffordable at your account's limit, provisioned throughput is the
+> lever — or skip rerank on intents where the eval set shows precision holds
+> without it.
 
 **Where the floor applies.** If the top score is below the applicable floor, return
 *nothing* and let the model say it doesn't know. Returning four weakly-relevant chunks is

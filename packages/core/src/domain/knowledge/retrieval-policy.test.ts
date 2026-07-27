@@ -31,72 +31,95 @@ const scored = (id: string, score: number, rerankScore: number | null = null): S
 });
 
 /**
- * Scores observed running the real pipeline against cohere.embed-v4:0 @ 1024d
- * on the Nailzify policy corpus. These are measurements, not invented numbers —
- * which is why they belong in the test suite rather than a comment.
+ * Scores observed running the real pipeline (cohere.embed-v4:0 @ 1024d ->
+ * cohere.rerank-v3-5:0) against the Nailzify policy corpus. Measurements, not
+ * invented numbers — which is why they live in the test suite rather than a
+ * comment, and why changing an embedding model should break these tests.
+ *
+ * Reproduce with: npx vite-node scripts/verify-retrieval.ts
  */
 const MEASURED = {
-  // Correct top-1 retrievals, weakest to strongest.
-  correct: {
-    customsFees: 0.184, // "will I be charged extra fees at the border?"
-    shipsToUk: 0.31, //   "do you post to Britain?"
-    refundOpened: 0.311, // "can I get my money back if I opened the packet?"
-    wearTime: 0.384, //   "how long do they stay on before falling off?"
-    safeRemoval: 0.59, //  "what's the safest way to take them off?"
+  cosine: {
+    correct: {
+      customsFees: 0.184, //  "will I be charged extra fees at the border?"
+      shipsToUk: 0.31, //     "do you post to Britain?"
+      refundOpened: 0.31, //  "can I get my money back if I opened the packet?"
+      wearTime: 0.384, //     "how long do they stay on before falling off?"
+      safeRemoval: 0.59, //   "what's the safest way to take them off?"
+    },
+    offTopicBest: 0.174, //   "do you accept bitcoin?"
   },
-  // Best score for a question the corpus genuinely does not answer.
-  offTopicBest: 0.174, // "do you accept bitcoin?"
+  rerank: {
+    correct: {
+      customsFees: 0.053, //  the hard one — vocabulary genuinely diverges
+      refundOpened: 0.207,
+      shipsToUk: 0.235,
+      wearTime: 0.419,
+      safeRemoval: 0.738,
+    },
+    offTopicBest: 0.039,
+  },
 } as const;
 
-describe("calibration against real embedding scores", () => {
-  it("does not abstain on the weakest CORRECT retrieval", () => {
-    // THE REGRESSION THIS FILE EXISTS FOR. An earlier hand-picked floor of 0.35
-    // rejected this, and three other correct answers with it. A threshold set by
-    // intuition was wrong in the direction that looks like a broken bot.
-    const outcome = applyRetrievalPolicy([scored("customs", MEASURED.correct.customsFees)]);
-
-    expect(outcome.kind).toBe("grounded");
-  });
-
+describe("calibration — raw cosine", () => {
   it("grounds every measured correct retrieval", () => {
-    for (const [name, score] of Object.entries(MEASURED.correct)) {
+    // An earlier hand-picked floor of 0.35 rejected four of these. A threshold
+    // set by intuition was wrong in the direction that looks like a broken bot.
+    for (const [name, score] of Object.entries(MEASURED.cosine.correct)) {
       const outcome = applyRetrievalPolicy([scored(name, score)]);
       expect(outcome.kind, `${name} @ ${score} should ground`).toBe("grounded");
     }
   });
 
-  it("cannot separate off-topic from correct on raw cosine alone", () => {
+  it("cannot separate off-topic from correct", () => {
     // THE HONEST FINDING, asserted rather than papered over.
     //
     // Off-topic tops out at 0.174; the weakest correct answer is 0.184. Any
-    // threshold that rejects the first also very nearly rejects the second.
-    // Rather than fit a number to a 0.01 window — which would pass this test and
-    // fail in production — we assert what is actually true: raw cosine grounds
-    // both, and the abstention decision has to come from somewhere else.
-    const offTopic = applyRetrievalPolicy([scored("bitcoin", MEASURED.offTopicBest)]);
+    // threshold rejecting the first very nearly rejects the second. Rather than
+    // fit a number to a 0.01 window — which would pass this test and fail in
+    // production — we assert what is true: raw cosine grounds both.
+    const offTopic = applyRetrievalPolicy([scored("bitcoin", MEASURED.cosine.offTopicBest)]);
     const weakestCorrect = applyRetrievalPolicy([
-      scored("customs", MEASURED.correct.customsFees),
+      scored("customs", MEASURED.cosine.correct.customsFees),
     ]);
 
     expect(offTopic.kind).toBe("grounded");
     expect(weakestCorrect.kind).toBe("grounded");
+    expect(MEASURED.cosine.correct.customsFees - MEASURED.cosine.offTopicBest).toBeLessThan(0.02);
+  });
+});
 
-    const margin = MEASURED.correct.customsFees - MEASURED.offTopicBest;
-    expect(margin).toBeLessThan(0.02);
+describe("calibration — cross-encoder rerank", () => {
+  it("grounds every measured correct retrieval", () => {
+    // A hand-picked rerankFloor of 0.35 rejected THREE of these. Cross-encoder
+    // scores are not percentages and do not read like confidence.
+    for (const [name, score] of Object.entries(MEASURED.rerank.correct)) {
+      const outcome = applyRetrievalPolicy([scored(name, 0.5, score)]);
+      expect(outcome.kind, `${name} @ rerank ${score} should ground`).toBe("grounded");
+    }
   });
 
-  it("separates them once a reranker has scored the pair", () => {
-    // The architectural payoff. A cross-encoder reads query and document
-    // together and produces well-separated, roughly calibrated scores — so the
-    // abstention decision becomes possible. This is why reranking is required
-    // on the knowledge plane, not optional.
-    const offTopic = applyRetrievalPolicy([scored("bitcoin", MEASURED.offTopicBest, 0.04)]);
-    const correct = applyRetrievalPolicy([
-      scored("customs", MEASURED.correct.customsFees, 0.81),
+  it("abstains on the off-topic control", () => {
+    // What raw cosine could not do. This is the reranker earning its place in
+    // the request path.
+    const outcome = applyRetrievalPolicy([
+      scored("bitcoin", MEASURED.cosine.offTopicBest, MEASURED.rerank.offTopicBest),
     ]);
 
-    expect(didAbstain(offTopic)).toBe(true);
-    expect(correct.kind).toBe("grounded");
+    expect(didAbstain(outcome)).toBe(true);
+  });
+
+  it("separates the typical case comfortably and the hard case narrowly", () => {
+    // Worth encoding because the headline "reranking fixes it" is too simple.
+    // Four of five correct answers sit 5x+ above the off-topic ceiling. One —
+    // where the question's vocabulary genuinely diverges from the source text —
+    // sits at 1.36x. The floor is fitted to that hard case, which is why it is
+    // provisional and why the model's grounding instruction is a second layer.
+    const { correct, offTopicBest } = MEASURED.rerank;
+
+    expect(correct.refundOpened / offTopicBest).toBeGreaterThan(5);
+    expect(correct.customsFees / offTopicBest).toBeLessThan(1.5);
+    expect(correct.customsFees / offTopicBest).toBeGreaterThan(1);
   });
 });
 
@@ -163,15 +186,20 @@ describe("applyRetrievalPolicy", () => {
 });
 
 describe("separate floors for separate score distributions", () => {
-  it("applies the stricter rerank floor once a reranker has run", () => {
-    // 0.25 clears the raw-cosine floor (0.15) but not the rerank floor (0.35).
-    // Cross-encoder scores are closer to calibrated relevance, so a higher bar
-    // is both possible and appropriate.
-    const withRerank = applyRetrievalPolicy([scored("a", 0.9, 0.25)]);
-    const withoutRerank = applyRetrievalPolicy([scored("a", 0.25)]);
+  it("applies the floor matching the scale it is looking at", () => {
+    // The same number, 0.06, means different things in the two distributions:
+    // respectable for a cross-encoder, near-noise for cosine. Applying one
+    // scale's threshold to the other is exactly the mistake that made both
+    // earlier hand-picked defaults wrong.
+    //
+    // Note the floors are NOT ordered — rerankFloor (0.045) is numerically
+    // LOWER than cosineFloor (0.10). Neither is "stricter"; they are simply
+    // measurements of different things.
+    const asRerank = applyRetrievalPolicy([scored("a", 0.5, 0.06)]);
+    const asCosine = applyRetrievalPolicy([scored("a", 0.06)]);
 
-    expect(withRerank.kind).toBe("insufficient");
-    expect(withoutRerank.kind).toBe("grounded");
+    expect(asRerank.kind).toBe("grounded");
+    expect(asCosine.kind).toBe("insufficient");
   });
 
   it("prefers the rerank score over raw similarity when ranking", () => {

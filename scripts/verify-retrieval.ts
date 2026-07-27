@@ -20,7 +20,11 @@
  * chunking policy. Scores from different models are not comparable.
  */
 import { chunkMarkdown, structuralContextHeader, embeddingText } from "@nailzify/core";
-import { createBedrockEmbedder, createInMemoryVectorStore } from "@nailzify/adapters";
+import {
+  createBedrockEmbedder,
+  createBedrockReranker,
+  createInMemoryVectorStore,
+} from "@nailzify/adapters";
 
 const SHIPPING = `
 # Nailzify Shipping Policy
@@ -73,7 +77,18 @@ const embedder = createBedrockEmbedder({
   modelId: "cohere.embed-v4:0",
   dimensions: 1024,
 });
+const reranker = createBedrockReranker({ region: "us-east-1", maxAttempts: 8 });
 const store = createInMemoryVectorStore();
+
+/**
+ * Pace between rerank calls.
+ *
+ * On-demand throughput for cohere.rerank-v3-5:0 is tight enough that three
+ * back-to-back calls throttle. This script is a measurement tool, not a load
+ * test, so it waits rather than fighting the limit.
+ */
+const PACE_MS = 4_000;
+const pace = () => new Promise((r) => setTimeout(r, PACE_MS));
 
 // ---- INGEST ----
 console.log("INGEST");
@@ -118,31 +133,79 @@ const QUESTIONS: { q: string; expect: string }[] = [
   { q: "will I be charged extra fees at the border?", expect: "shipping-policy" },
 ];
 
-console.log("SEARCH");
+console.log("SEARCH  (cosine -> rerank)");
 let passed = 0;
+const correctCosine: number[] = [];
+const correctRerank: number[] = [];
+
 for (const { q, expect } of QUESTIONS) {
   const [vector] = await embedder.embedBatch([q], "query");
-  const results = await store.searchKnowledge(vector!, 3);
-  const top = results[0]!;
+  // Retrieve wide, then let the cross-encoder narrow. Setting topK generously
+  // costs little and gives the reranker something to work with.
+  const candidates = await store.searchKnowledge(vector!, 6);
+  await pace();
+  const reranked = await reranker.rerank(q, candidates, 3);
+
+  const top = reranked[0]!;
   const hit = top.chunk.documentId === expect;
-  if (hit) passed += 1;
+  if (hit) {
+    passed += 1;
+    correctCosine.push(top.score);
+    correctRerank.push(top.rerankScore!);
+  }
 
   console.log(`  ${hit ? "PASS" : "FAIL"}  "${q}"`);
-  console.log(`        -> ${top.chunk.documentId} / ${top.chunk.section}  (${top.score.toFixed(3)})`);
+  console.log(
+    `        -> ${top.chunk.documentId} / ${top.chunk.section}` +
+      `   cosine ${top.score.toFixed(3)}  rerank ${top.rerankScore!.toFixed(3)}`,
+  );
   if (!hit) console.log(`        !! expected ${expect}`);
 }
 
 // ---- ABSTENTION ----
-// Nothing in the corpus answers this. The scores it comes back with are what
-// the relevance floor has to separate from a real match.
-const [offTopic] = await embedder.embedBatch(
-  ["do you accept payment in bitcoin or other cryptocurrency?"],
-  "query",
-);
-const offResults = await store.searchKnowledge(offTopic!, 3);
+// Nothing in the corpus answers this. Whatever scores come back are what the
+// relevance floor has to separate from a genuine match — the whole reason this
+// script exists.
+const OFF_TOPIC = "do you accept payment in bitcoin or other cryptocurrency?";
+const [offVector] = await embedder.embedBatch([OFF_TOPIC], "query");
+const offCandidates = await store.searchKnowledge(offVector!, 6);
+await pace();
+const offReranked = await reranker.rerank(OFF_TOPIC, offCandidates, 3);
+
 console.log(`\nOFF-TOPIC ("bitcoin payments" — not in corpus)`);
-for (const r of offResults) {
-  console.log(`  ${r.score.toFixed(3)}  ${r.chunk.documentId} / ${r.chunk.section}`);
+for (const r of offReranked) {
+  console.log(
+    `  cosine ${r.score.toFixed(3)}  rerank ${r.rerankScore!.toFixed(3)}   ` +
+      `${r.chunk.documentId} / ${r.chunk.section}`,
+  );
 }
+
+// ---- CALIBRATION ----
+// This block is the point of the whole script: it produces the numbers that
+// belong in DEFAULT_RETRIEVAL_POLICY. Do not hand-pick thresholds; read them
+// off here and re-run whenever the embedding or rerank model changes.
+const worstCorrectCosine = Math.min(...correctCosine);
+const worstCorrectRerank = Math.min(...correctRerank);
+const bestOffCosine = Math.max(...offReranked.map((r) => r.score));
+const bestOffRerank = Math.max(...offReranked.map((r) => r.rerankScore!));
+
+const ratio = (good: number, bad: number) => (bad === 0 ? Infinity : good / bad);
+
+console.log(`\nCALIBRATION`);
+console.log(`                  worst correct   best off-topic   separation`);
+console.log(
+  `  cosine          ${worstCorrectCosine.toFixed(3).padStart(13)}   ` +
+    `${bestOffCosine.toFixed(3).padStart(14)}   ` +
+    `${ratio(worstCorrectCosine, bestOffCosine).toFixed(2)}x`,
+);
+console.log(
+  `  rerank          ${worstCorrectRerank.toFixed(3).padStart(13)}   ` +
+    `${bestOffRerank.toFixed(3).padStart(14)}   ` +
+    `${ratio(worstCorrectRerank, bestOffRerank).toFixed(2)}x`,
+);
+console.log(
+  `\n  suggested rerankFloor: ${((worstCorrectRerank + bestOffRerank) / 2).toFixed(3)}` +
+    `  (midpoint of the gap)`,
+);
 
 console.log(`\nRESULT: ${passed}/${QUESTIONS.length} semantic matches correct`);

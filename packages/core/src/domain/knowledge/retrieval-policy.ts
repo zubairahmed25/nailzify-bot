@@ -66,11 +66,29 @@ export interface RetrievalPolicy {
    * Floor applied to CROSS-ENCODER rerank scores, when a reranker has run.
    *
    * Separate from `cosineFloor` because the two are different distributions and
-   * one threshold cannot serve both. A cross-encoder reads the query and the
-   * document together and emits something much closer to a calibrated relevance
-   * probability, so a meaningful absolute threshold is actually possible here.
+   * one threshold cannot serve both. Applying a cross-encoder threshold to raw
+   * cosine (or the reverse) compares numbers from different scales.
    *
-   * Still calibrate it on your own eval set — this is a starting point.
+   * ⚠️ MEASURED against `cohere.rerank-v3-5:0`, and the numbers are much lower
+   * than intuition suggests:
+   *
+   *     correct answers      0.053 – 0.738
+   *     off-topic control    0.032 – 0.039
+   *
+   * A hand-picked 0.35 would have abstained on THREE of five correct answers.
+   * That is the second time on this project that an intuited threshold was
+   * badly wrong — cross-encoder scores are not percentages and do not read like
+   * confidence.
+   *
+   * The distribution is bimodal in a useful way: four of five correct answers
+   * land at 0.207+ (5-19x above the off-topic ceiling), while one hard query
+   * lands at 0.053. This floor is set just under that hard case, which means it
+   * is FITTED TO ONE DATA POINT and should be treated as provisional.
+   *
+   * ⚠️ This is a method, not a final answer. Six chunks and five questions is a
+   * demonstration corpus. Re-derive these on your real corpus with 30-50
+   * questions from the support inbox before trusting them in production —
+   * `npx vite-node scripts/verify-retrieval.ts` prints the calibration table.
    */
   readonly rerankFloor: number;
 
@@ -95,18 +113,25 @@ export interface RetrievalPolicy {
 }
 
 /**
- * Defaults calibrated against `cohere.embed-v4:0` @ 1024d on the Nailzify
- * corpus. See the note on `cosineFloor` for the measured distribution.
+ * Defaults measured against `cohere.embed-v4:0` @ 1024d + `cohere.rerank-v3-5:0`
+ * on the Nailzify verification corpus. See the per-field notes for the observed
+ * distributions and their limits.
  *
- * Re-measure whenever you change the embedding model. Scores from different
- * models are not comparable, so a floor carried over from one to another is
- * a number with no meaning.
+ * `topResultMargin` is small because the measured gaps are small — a larger
+ * margin would reject correct answers. That thinness is itself the finding: a
+ * threshold is one layer of the abstention decision, and the model's grounding
+ * instruction (docs/04-retrieval.md §4.7) is the other. Neither is sufficient
+ * alone.
+ *
+ * ⚠️ Re-measure whenever you change the embedding OR rerank model. Scores from
+ * different models are not comparable, so a floor carried across is a number
+ * with no meaning.
  */
 export const DEFAULT_RETRIEVAL_POLICY: RetrievalPolicy = {
   cosineFloor: 0.1,
-  rerankFloor: 0.35,
+  rerankFloor: 0.045,
   maxChunks: 4,
-  topResultMargin: 0.02,
+  topResultMargin: 0.005,
 };
 
 /**
