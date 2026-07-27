@@ -41,9 +41,15 @@ jobs:
 
       # The domain layer must never import infrastructure. See docs/07-backend.md.
       # ESLint enforces this too; this grep survives an eslint-disable.
+      #
+      # NOTE: the pattern deliberately anchors on `from "..."` / `require("...")`
+      # rather than matching the bare package name anywhere in the file. A naive
+      # substring match also flags the doc comments that *describe* this rule,
+      # which fails the build on correct code.
       - name: Enforce architecture boundaries
         run: |
-          if grep -rnE "@aws-sdk|@pinecone-database|aws-lambda|@shopify/" \
+          FORBIDDEN='(@aws-sdk/|@pinecone-database/|aws-lambda|@shopify/)'
+          if grep -rnE "(from|require\()\s*['\"]${FORBIDDEN}" \
                packages/core/src --include="*.ts" ; then
             echo "::error::packages/core must not import infrastructure — see docs/07-backend.md §7.9"
             exit 1
