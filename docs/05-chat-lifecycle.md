@@ -71,6 +71,26 @@ if (!verifyShopifyProxyHmac(request, await getSecret("shopify/proxy-secret"))) {
 }
 ```
 
+> **Which Shopify credential is this?** `shopify/proxy-secret` holds the app's
+> **API secret key** (Client secret), from *Apps → Develop apps → your app → API
+> credentials*. Shopify signs every App Proxy request with it; we verify with the
+> same value.
+>
+> It is **not** the Storefront API access token. This system uses two Shopify
+> credentials in opposite directions, and mixing them up produces a confusing
+> 401:
+>
+> | Credential | Direction | Used for |
+> |---|---|---|
+> | API secret key (Client secret) | inbound | Verifying App Proxy HMAC — this check |
+> | Storefront API access token | outbound | Calling the Storefront API to hydrate products |
+>
+> Sensitivity differs too. Storefront tokens are designed to be publicly visible
+> (headless storefronts ship them in browser JS), so a leak is low-severity. The
+> **API secret key is genuinely sensitive** — it is what makes a request
+> unforgeable. Treat only the latter as a true secret, and keep both in Secrets
+> Manager anyway.
+
 **Use a timing-safe comparison** (`crypto.timingSafeEqual`), not `===`. A naive string
 compare leaks the correct signature byte by byte through response timing. This is a real,
 practical attack against HMAC verification and the mitigation is one function call.

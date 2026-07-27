@@ -39,9 +39,14 @@ if (!shopDomain || !accessToken) {
       "  export SHOPIFY_STOREFRONT_TOKEN=<Storefront API access token>\n\n" +
       "The token comes from your Shopify custom app:\n" +
       "  Shopify admin -> Settings -> Apps and sales channels -> Develop apps\n" +
-      "  -> your app -> API credentials -> Storefront API access token\n\n" +
-      "Required scope: unauthenticated_read_product_listings\n" +
-      "Do NOT use an Admin API token — see packages/adapters/src/shopify/storefront-client.ts",
+      "  -> your app -> API credentials -> Storefront API access token\n" +
+      "  (tokens only appear AFTER you click Install app)\n\n" +
+      "Required scope: unauthenticated_read_product_listings\n\n" +
+      "That page shows several credentials. You want the STOREFRONT API ACCESS\n" +
+      "TOKEN — not the Admin API token, and not the API key / API secret key.\n" +
+      "  Storefront API access token -> calling the Storefront API (this script)\n" +
+      "  API secret key (Client secret) -> verifying App Proxy HMAC (used later)\n" +
+      "  Admin API access token -> deliberately unused; see storefront-client.ts",
   );
   process.exit(1);
 }
