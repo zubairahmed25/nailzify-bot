@@ -82,7 +82,9 @@ for (const version of VERSIONS) {
       });
 
       const text = await response.text();
-      let detail = text.slice(0, 160).replace(/\s+/g, " ");
+      // Shopify usually explains a 4xx in the body. Capture enough of it to be
+      // useful — the status code alone does not distinguish the causes.
+      let detail = text.slice(0, 300).replace(/\s+/g, " ").trim() || "(empty body)";
       let ok = false;
 
       if (response.ok) {
@@ -150,6 +152,7 @@ if (working) {
 
 // Nothing worked — narrow it down from the failure pattern.
 const all401 = results.every((r) => r.status === 401);
+const all403 = results.every((r) => r.status === 403);
 const all404 = results.every((r) => r.status === 404);
 const anyGraphQlScope = results.some((r) => /access denied|scope|permission/i.test(r.detail));
 
@@ -167,6 +170,30 @@ if (anyGraphQlScope) {
       `  SHOPIFY_SHOP_DOMAIN is "${shopDomain}". It must be the permanent\n` +
       "  .myshopify.com host — not a custom storefront domain. Find it in\n" +
       "  Shopify admin -> Settings -> Domains (look for the myshopify.com one).",
+  );
+} else if (all403) {
+  console.log(
+    "  Every request returned 403. That is meaningfully different from 401:\n" +
+      "  the token was ACCEPTED but the request was not AUTHORIZED. So the token\n" +
+      "  itself is real and belongs to this store — the problem is permission or\n" +
+      "  storefront visibility.\n\n" +
+      "  Causes, in order of likelihood:\n\n" +
+      "  1. The app lacks unauthenticated_read_product_listings.\n" +
+      "     Develop apps -> your app -> Configuration ->\n" +
+      "       Storefront API integration -> Configure ->\n" +
+      "       tick unauthenticated_read_product_listings -> Save\n" +
+      "     ⚠️ Then REINSTALL the app and copy the NEW token. Scopes are baked in\n" +
+      "        when a token is issued; an existing token does not gain them.\n\n" +
+      "  2. The storefront is PASSWORD PROTECTED.\n" +
+      "     Online Store -> Preferences -> Password protection.\n" +
+      "     A protected storefront restricts unauthenticated Storefront API\n" +
+      "     access. Development stores have this on by default, which is why this\n" +
+      "     bites so often. Disable it, or test against a store without it.\n\n" +
+      "  3. No products are published to the sales channel this token can see.\n" +
+      "     A product must be published to the relevant channel to be readable.\n" +
+      "     Check a product -> Publishing -> ensure the channel is ticked.\n\n" +
+      "  Read the response body in the table above — Shopify usually names the\n" +
+      "  missing scope explicitly.",
   );
 } else if (all401) {
   console.log(
