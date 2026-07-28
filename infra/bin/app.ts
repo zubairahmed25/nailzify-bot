@@ -33,6 +33,12 @@ const config = {
   storefrontDomain: app.node.tryGetContext("storefrontDomain") ?? "nailzify.com",
   pineconeIndex: `nailzify-${envName}`,
 
+  // ⚠️ Shopify supports each API version for ~12 months, then retires it. A
+  // stale value fails like a bad credential rather than saying "version gone",
+  // so this needs a periodic review — verified working via
+  // scripts/diagnose-shopify.ts.
+  shopifyApiVersion: app.node.tryGetContext("shopifyApiVersion") ?? "2025-10",
+
   // ⚠️ INFERENCE PROFILE IDs, not bare model IDs. A bare
   // `anthropic.claude-sonnet-4-6` returns ValidationException — current Claude
   // models on Bedrock require a cross-region profile, and the error does not

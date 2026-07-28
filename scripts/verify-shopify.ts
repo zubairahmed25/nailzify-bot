@@ -30,7 +30,10 @@ const shopDomain = process.env["SHOPIFY_SHOP_DOMAIN"];
 const accessToken = process.env["SHOPIFY_STOREFRONT_TOKEN"];
 // Public storefront domain for fallback URLs; defaults to the myshopify one.
 const storefrontDomain = process.env["SHOPIFY_STOREFRONT_DOMAIN"] ?? shopDomain ?? "";
-const apiVersion = process.env["SHOPIFY_API_VERSION"] ?? "2025-01";
+// ⚠️ Shopify retires each API version after ~12 months. A stale default fails
+// in a way that looks like a bad token. Run scripts/diagnose-shopify.ts to find
+// the newest version this store actually accepts.
+const apiVersion = process.env["SHOPIFY_API_VERSION"] ?? "2025-10";
 // Private is correct for server-side callers. Set SHOPIFY_TOKEN_KIND=public
 // only if you deliberately created a public Storefront token.
 const tokenKind = process.env["SHOPIFY_TOKEN_KIND"] === "public" ? "public" : "private";
@@ -61,49 +64,34 @@ if (!shopDomain || !accessToken) {
 // into a specific next action.
 // ---------------------------------------------------------------------------
 
-const problems: string[] = [];
+// ⚠️ THESE ARE HINTS, NOT GATES. An earlier version BLOCKED on token shape and
+// rejected a perfectly valid setup: `shpat_` covers Admin API tokens AND
+// delegate access tokens, and a delegate token is precisely what a private
+// Storefront token is.
+//
+// A credential's prefix does not determine its purpose. The API is the only
+// authority on whether a token works, so we warn and proceed — never preempt it.
+const hints: string[] = [];
 
-if (accessToken.startsWith("shpat_")) {
-  problems.push(
-    'Token starts with "shpat_" — that is an ADMIN API access token.\n' +
-      "     You need the STOREFRONT API access token from the same page.\n" +
-      "     (This project deliberately never uses the Admin API — see\n" +
-      "      packages/adapters/src/shopify/storefront-client.ts)",
-  );
-} else if (accessToken.startsWith("shpss_") || accessToken.startsWith("shpca_")) {
-  problems.push(
-    "Token looks like an app secret / client credential, not a Storefront\n" +
-      "     access token. The API secret key is for verifying inbound App Proxy\n" +
-      "     HMAC, not for calling the Storefront API.",
-  );
-} else if (tokenKind === "public" && !/^[0-9a-f]{32}$/i.test(accessToken)) {
-  problems.push(
-    `SHOPIFY_TOKEN_KIND=public but the token is ${accessToken.length} chars, not the\n` +
-      "     32 hex digits a PUBLIC token usually is. If this is a private token,\n" +
-      "     unset SHOPIFY_TOKEN_KIND — private is the default and is correct for\n" +
-      "     server-side calls.",
+if (accessToken.startsWith("shpss_") || accessToken.startsWith("shpca_")) {
+  hints.push(
+    "Token prefix suggests an app secret / client credential rather than a\n" +
+      "     Storefront token. If auth fails, check you didn't paste the API secret\n" +
+      "     key — that one is for verifying inbound App Proxy HMAC.",
   );
 }
 
 if (!shopDomain.endsWith(".myshopify.com")) {
-  problems.push(
-    `SHOPIFY_SHOP_DOMAIN is "${shopDomain}". The API host must be the permanent\n` +
-      "     .myshopify.com domain, not a custom storefront domain. Set\n" +
-      "     SHOPIFY_STOREFRONT_DOMAIN separately if your public domain differs.",
+  hints.push(
+    `SHOPIFY_SHOP_DOMAIN is "${shopDomain}", which is not a .myshopify.com host.\n` +
+      "     The API host must be the permanent domain. Set SHOPIFY_STOREFRONT_DOMAIN\n" +
+      "     separately if your public storefront domain differs.",
   );
 }
 
-if (problems.length > 0) {
-  console.error("PREFLIGHT FOUND LIKELY CAUSES:\n");
-  for (const problem of problems) console.error(`  ✗  ${problem}\n`);
-  console.error(
-    "Fix these and re-run. If the token looks right, the remaining causes are:\n" +
-      "  • the app is not installed on the store (Develop apps -> Install app)\n" +
-      "  • Storefront API scopes were never configured for the app\n" +
-      "    (Configuration -> Storefront API integration ->\n" +
-      "     tick unauthenticated_read_product_listings -> Save, then reinstall)\n",
-  );
-  process.exit(1);
+if (hints.length > 0) {
+  console.log("PREFLIGHT NOTES (not blocking — proceeding anyway)\n");
+  for (const hint of hints) console.log(`  •  ${hint}\n`);
 }
 
 const warnings: string[] = [];
@@ -154,7 +142,8 @@ try {
   } else if (message.includes("404")) {
     console.error(
       `\n  404 usually means the shop domain is wrong, or API version "${apiVersion}"\n` +
-        "  is no longer supported. Try SHOPIFY_API_VERSION=2025-04.\n",
+        "  is no longer supported — Shopify retires versions after ~12 months.\n" +
+        "  Run: npx vite-node scripts/diagnose-shopify.ts\n",
     );
   }
   process.exit(1);

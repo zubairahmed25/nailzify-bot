@@ -80,7 +80,7 @@ export interface StorefrontClientConfig {
    */
   readonly buyerIp?: () => string | undefined;
   /**
-   * Pinned API version, e.g. `2025-01`.
+   * Pinned API version, e.g. `2025-10`.
    *
    * PIN IT EXPLICITLY. Shopify releases quarterly and supports each version for
    * a year. An unpinned client silently follows the latest release and can break

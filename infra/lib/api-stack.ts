@@ -32,6 +32,8 @@ export interface ApiStackProps extends cdk.StackProps {
   readonly shopDomain: string;
   readonly storefrontDomain: string;
   readonly pineconeIndex: string;
+  /** Pinned Shopify API version, e.g. `2025-10`. Retires after ~12 months. */
+  readonly shopifyApiVersion: string;
   /** Inference-profile IDs. Bare model IDs are rejected — see llm-client.ts. */
   readonly chatModelId: string;
   readonly fastModelId: string;
@@ -87,7 +89,9 @@ export class ApiStack extends cdk.Stack {
         TABLE_NAME: props.table.tableName,
         SHOP_DOMAIN: props.shopDomain,
         STOREFRONT_DOMAIN: props.storefrontDomain,
-        SHOPIFY_API_VERSION: "2025-01",
+        // ⚠️ Shopify retires API versions after ~12 months. Review this on a
+        // calendar reminder — a retired version fails like a bad credential.
+        SHOPIFY_API_VERSION: props.shopifyApiVersion,
         PINECONE_INDEX: props.pineconeIndex,
         CHAT_MODEL_ID: props.chatModelId,
         FAST_MODEL_ID: props.fastModelId,

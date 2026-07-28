@@ -30,19 +30,25 @@ if (!shopDomain || !token) {
 const mask = (t: string) =>
   t.length <= 8 ? "*".repeat(t.length) : `${t.slice(0, 4)}${"*".repeat(t.length - 8)}${t.slice(-4)}`;
 
-console.log("TOKEN SHAPE");
-console.log(`  masked            ${mask(token)}`);
-console.log(`  length            ${token.length}`);
-console.log(`  looks like        ${describeShape(token)}`);
-console.log(`  shop              ${shopDomain}\n`);
-
+/**
+ * Describe the token shape — as a HINT ONLY, never as a verdict.
+ *
+ * ⚠️ Prefixes do NOT reliably identify a credential's purpose. `shpat_` covers
+ * both Admin API tokens AND delegate access tokens, and a delegate token is
+ * exactly what a private Storefront token is. Treating `shpat_` as "definitely
+ * an Admin token" is wrong and, worse, previously blocked a perfectly valid
+ * setup from running.
+ *
+ * The API is the only authority on whether a token works. Probe, don't infer.
+ */
 function describeShape(t: string): string {
-  if (t.startsWith("shpat_")) return "ADMIN API token (shpat_) — wrong credential entirely";
-  if (t.startsWith("shpss_")) return "app secret / client secret — wrong credential entirely";
-  if (t.startsWith("shpca_")) return "client credential — wrong credential entirely";
-  if (/^[0-9a-f]{32}$/i.test(t)) return "PUBLIC Storefront token (32 hex)";
-  if (/^shpsa_/.test(t)) return "private Storefront token";
-  return "unrecognised — could still be a valid private token";
+  if (t.startsWith("shpat_")) {
+    return "shpat_ — an Admin API token OR a delegate (private Storefront) token; both share this prefix";
+  }
+  if (t.startsWith("shpss_")) return "shpss_ — usually an app secret";
+  if (t.startsWith("shpca_")) return "shpca_ — usually a client credential";
+  if (/^[0-9a-f]{32}$/i.test(t)) return "32 hex — usually a PUBLIC Storefront token";
+  return "unrecognised shape (this says nothing about validity)";
 }
 
 // ---------------------------------------------------------------------------
@@ -54,8 +60,44 @@ const HEADERS = [
   { kind: "public", header: "X-Shopify-Storefront-Access-Token" },
 ] as const;
 
-// If the pinned version is retired the API 404s, which reads like a bad domain.
-const VERSIONS = ["2025-01", "2025-04", "2024-10"];
+/**
+ * Candidate API versions, derived from TODAY rather than hardcoded.
+ *
+ * ⚠️ THIS IS THE BUG THAT COST US. Shopify releases quarterly (Jan/Apr/Jul/Oct)
+ * and supports each version for roughly 12 months. A hardcoded list silently
+ * rots: every entry retires, and a request against a retired version fails in a
+ * way that looks like a bad token or a bad domain.
+ *
+ * Generating the list from the current date means this script keeps working
+ * without anyone remembering to update it — and it reports the NEWEST version
+ * that actually responds, so the answer is measured rather than assumed.
+ */
+function candidateVersions(now = new Date()): string[] {
+  const out: string[] = [];
+  // Quarter that has definitely shipped, then walk backwards two years.
+  let year = now.getUTCFullYear();
+  let month = [1, 4, 7, 10].filter((m) => m <= now.getUTCMonth() + 1).pop() ?? 10;
+  if (month === 10 && now.getUTCMonth() + 1 < 10) year -= 1;
+
+  for (let i = 0; i < 9; i += 1) {
+    out.push(`${year}-${String(month).padStart(2, "0")}`);
+    month -= 3;
+    if (month < 1) {
+      month = 10;
+      year -= 1;
+    }
+  }
+  return out;
+}
+
+const VERSIONS = candidateVersions();
+
+console.log("TOKEN SHAPE (informational — the probe below is what decides)");
+console.log(`  masked            ${mask(token)}`);
+console.log(`  length            ${token.length}`);
+console.log(`  prefix hint       ${describeShape(token)}`);
+console.log(`  shop              ${shopDomain}`);
+console.log(`  probing versions  ${VERSIONS.join(", ")}\n`);
 
 // Cheapest possible query that still proves the product scope is granted.
 const QUERY = `{ shop { name } products(first: 1) { nodes { handle } } }`;
