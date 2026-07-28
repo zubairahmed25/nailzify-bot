@@ -262,14 +262,26 @@ async function runProductDetails(
  * by its title, description and live price — all of which are true.
  */
 function describeAttributes(attrs: {
+  readonly kind: string;
   readonly shape: string | null;
   readonly length: string | null;
+  readonly style: string | null;
   readonly finishes: readonly string[];
+  readonly colourNotes: readonly string[];
 }): string {
   const known = [
+    // Accessories are called out explicitly. Without it the model has only the
+    // title to go on, and "Semi-Solid Glue" listed among nail sets invites it to
+    // describe a glue as if it were something you could wear.
+    attrs.kind === "accessory" ? "type: accessory, not a nail set" : "",
     attrs.shape ? `shape: ${attrs.shape}` : "",
     attrs.length ? `length: ${attrs.length}` : "",
+    // 35 of 40 products carry a style and it never reached the model before, so
+    // the one attribute customers actually name — "chrome", "cat-eye", "french"
+    // — could not be mentioned or matched.
+    attrs.style ? `style: ${attrs.style}` : "",
     attrs.finishes.length > 0 ? `finish: ${attrs.finishes.join(", ")}` : "",
+    attrs.colourNotes.length > 0 ? `colour: ${attrs.colourNotes.join(", ")}` : "",
   ].filter(Boolean);
 
   return known.length > 0 ? `    <attributes>${known.join(" | ")}</attributes>` : "";

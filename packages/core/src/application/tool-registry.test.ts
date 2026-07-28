@@ -23,6 +23,7 @@ import { TOOL_NAMES } from "../prompts/tools.js";
 // ---------------------------------------------------------------------------
 
 const attrs: ProductAttributes = {
+  kind: "nail-set",
   shape: "almond",
   length: "short",
   finishes: ["matte"],
@@ -436,5 +437,75 @@ describe("escalation", () => {
     expect(artifacts.escalated).toBe(true);
     expect(artifacts.escalationSummary).toBe("wants refund on #1234");
     expect(outcome.content).toContain("do not attempt to resolve");
+  });
+});
+
+describe("what the model is told about a product", () => {
+  const candidate: ProductCandidate = {
+    productId: ProductId("gid://shopify/Product/1"),
+    score: 0.8,
+    priceBand: "15-25",
+    attributes: attrs,
+  };
+
+  it("includes style, the attribute customers actually name", async () => {
+    // 35 of 40 live products carry a style ("3D Cat-eye", "Chrome") and it never
+    // reached the model, so it could neither mention nor match the one dimension
+    // customers use most.
+    const registry = deps({ candidates: [candidate], products: [product()] });
+
+    const outcome = await registry.execute(
+      call(TOOL_NAMES.searchProducts, { query: "chrome nails" }),
+      newTurnArtifacts(),
+    );
+
+    expect(outcome.content).toContain("style: Chrome");
+  });
+
+  it("marks an accessory so it is not described as something wearable", async () => {
+    const glue = product({
+      title: "Semi-Solid Glue (No UV light needed)",
+      attributes: {
+        kind: "accessory",
+        shape: null,
+        length: null,
+        finishes: [],
+        style: null,
+        occasions: [],
+        suitableFor: [],
+        colourNotes: [],
+      },
+    });
+    const registry = deps({ candidates: [candidate], products: [glue] });
+
+    const outcome = await registry.execute(
+      call(TOOL_NAMES.searchProducts, { query: "glue" }),
+      newTurnArtifacts(),
+    );
+
+    expect(outcome.content).toContain("accessory");
+  });
+
+  it("still states no attribute it does not have", async () => {
+    const bare = product({
+      attributes: {
+        kind: "nail-set",
+        shape: null,
+        length: null,
+        finishes: [],
+        style: null,
+        occasions: ["everyday"],
+        suitableFor: [],
+        colourNotes: [],
+      },
+    });
+    const registry = deps({ candidates: [candidate], products: [bare] });
+
+    const outcome = await registry.execute(
+      call(TOOL_NAMES.searchProducts, { query: "x" }),
+      newTurnArtifacts(),
+    );
+
+    expect(outcome.content).not.toContain("<attributes>");
   });
 });

@@ -249,6 +249,7 @@ describe("the two planes joined", () => {
         score: 0.81,
         priceBand: "15-25",
         attributes: {
+          kind: "nail-set",
           shape: "almond",
           length: "short",
           finishes: ["matte"],
@@ -263,6 +264,7 @@ describe("the two planes joined", () => {
         score: 0.79,
         priceBand: "15-25",
         attributes: {
+          kind: "nail-set",
           shape: "almond",
           length: "short",
           finishes: ["matte"],

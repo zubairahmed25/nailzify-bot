@@ -52,6 +52,20 @@ import type { Money, PriceBand } from "../shared/money.js";
  * question — re-derive them with scripts/probe-metafields.ts when the catalogue
  * changes.
  */
+/**
+ * Nail set or accessory.
+ *
+ * Nailzify sells 36 nail sets alongside a file, a remover and two glues. The
+ * distinction matters because an accessory has no shape, no occasion and no
+ * suitable-experience-level, and inventing those for it is the same fabrication
+ * this codebase refuses everywhere else.
+ *
+ * Derived, not stored — see the classifier in the Shopify adapter. Validated
+ * against the live catalogue: 4 of 40 classified as accessories, and all four
+ * are the four non-nail products. No nail set was misclassified.
+ */
+export type ProductKind = "nail-set" | "accessory";
+
 export type NailShape = "almond" | "square" | "coffin" | "oval";
 
 /**
@@ -94,6 +108,7 @@ export type ExperienceLevel = "beginner" | "comfortable" | "experienced";
  * "it is almond". Only one of those is honest.
  */
 export interface ProductAttributes {
+  readonly kind: ProductKind;
   readonly shape: NailShape | null;
   readonly length: NailLength | null;
   /**
@@ -168,9 +183,15 @@ export interface Product {
   readonly title: string;
   readonly description: string;
   /**
-   * Shopify's own `productType`. Carried through because it is the field that
-   * distinguishes a nail set from a file, a remover or a glue — a distinction
-   * the attribute metafields only imply.
+   * Shopify's own `productType`.
+   *
+   * ⚠️ EMPTY ON ALL 40 LIVE PRODUCTS. It is the field that *should* distinguish a
+   * nail set from a file or a glue, and an earlier comment here claimed it did.
+   * It does not — nobody has filled it in. Kept because it costs nothing, it is
+   * already on the wire, and the verification script prints its distinct values
+   * so the day it gets populated is visible. Do not classify on it today.
+   *
+   * The working classifier is `ProductAttributes.kind`.
    */
   readonly productType: string;
   readonly url: string;
@@ -279,6 +300,7 @@ export function productVectorMetadata(input: {
   return {
     productId: input.productId,
     priceBand: input.priceBand,
+    kind: input.attributes.kind,
     // Nulls are omitted rather than written as "". An absent key and an empty
     // string read back identically here, and omitting keeps stores that charge
     // for metadata size honest.
@@ -304,6 +326,10 @@ export function productAttributesFromMetadata(read: {
   strArray: (key: string) => string[];
 }): ProductAttributes {
   return {
+    // Defaults to nail-set: the overwhelming majority, and the safe error. A
+    // misclassified accessory is a slightly odd suggestion; a misclassified nail
+    // set would be invisible to every nail query.
+    kind: (read.str("kind") || "nail-set") as ProductKind,
     shape: (read.str("shape") || null) as NailShape | null,
     length: (read.str("length") || null) as NailLength | null,
     finishes: read.strArray("finishes") as NailFinish[],

@@ -209,20 +209,15 @@ if (warnings.length > 12) console.log(`     ... and ${warnings.length - 12} more
 
 // Products carrying no nail attribute at all are accessories — files, removers,
 // glues. Listed so the classification can be eyeballed rather than assumed.
-const accessories = items.filter(
-  (p) =>
-    p.attributes.shape === null &&
-    p.attributes.style === null &&
-    p.attributes.colourNotes.length === 0 &&
-    p.attributes.finishes.length === 0,
-);
+const accessories = items.filter((p) => p.attributes.kind === "accessory");
 console.log(`\n  Classified as accessories (no nail attributes): ${accessories.length}`);
 for (const p of accessories) console.log(`     ${p.title}`);
 console.log("  ^ these should ALL be non-nail products. A nail set here is a bug.");
 
-// productType is fetched but not yet used for classification. Printing the
-// distinct values is how we find out whether it is a better signal than the
-// attribute heuristic above — measured, not assumed.
+// ⚠️ MEASURED, AND THE ANSWER WAS NO. productType is empty on all 40 products,
+// so it cannot classify anything today. Still printed every run: the moment it
+// gets populated it becomes a better signal than the attribute heuristic, and
+// this is how we would find out.
 const types = new Map<string, number>();
 for (const p of items) {
   const t = p.productType || "(empty)";

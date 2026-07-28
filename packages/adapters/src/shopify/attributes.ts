@@ -34,6 +34,7 @@ import type {
   NailLength,
   NailShape,
   Occasion,
+  ProductKind,
   ProductAttributes,
 } from "@nailzify/core";
 
@@ -93,19 +94,33 @@ const LENGTHS: Record<string, NailLength> = {
 const PATTERNS = new Set(["floral", "geometric", "abstract", "striped", "animal print"]);
 
 /**
- * True when a product carries any evidence of being a nail set.
+ * Classify a product as a nail set or an accessory.
  *
- * Deliberately permissive — ANY of the four fields counts. Nailzify sells a nail
- * file, a remover and two glues alongside 36 nail sets, and none of the four
- * accessories has a shape, style, colour or finish. A nail set missing only its
- * shape still trips this, which is exactly the case worth warning about.
+ * ⚠️ THIS IS A HEURISTIC, AND IT IS THE ONLY ONE AVAILABLE. `productType` is the
+ * field that should carry this and it is EMPTY on all 40 live products. So the
+ * signal is the metafields: a product with no shape, style, colour or finish is
+ * not a nail set.
+ *
+ * VALIDATED, NOT ASSUMED. On the live catalogue this classifies exactly 4 of 40
+ * as accessories — Nail Remover, Glass Nail File, and the two glues — with no
+ * nail set misclassified. "Snowflake Wishes" has no shape but does have a
+ * colour, so it stays a nail set, which is correct.
+ *
+ * WHERE IT WOULD BREAK: a genuinely new nail set added with no metafields at all
+ * would be classified an accessory and drop out of nail recommendations. That is
+ * why scripts/verify-shopify.ts prints the accessory list on every run — the
+ * check is "are these all non-nail products?", and it is a human check because
+ * no better signal exists yet. If productType ever gets populated, switch to it.
  */
-function hasAnyNailAttribute(raw: RawMetafields): boolean {
-  return Boolean(raw.style) || raw.colours.length > 0 || raw.finishes.length > 0;
+function classify(raw: RawMetafields): ProductKind {
+  const hasNailAttribute =
+    Boolean(raw.shape) || Boolean(raw.style) || raw.colours.length > 0 || raw.finishes.length > 0;
+  return hasNailAttribute ? "nail-set" : "accessory";
 }
 
 export function parseMetafields(raw: RawMetafields, productTitle: string): ParsedAttributes {
   const warnings: string[] = [];
+  const kind = classify(raw);
 
   // ---- shape, and the length hiding inside it ------------------------------
   //
@@ -127,7 +142,7 @@ export function parseMetafields(raw: RawMetafields, productTitle: string): Parse
           `Expected one of ${Object.keys(SHAPES).join(", ")}.`,
       );
     }
-  } else if (hasAnyNailAttribute(raw)) {
+  } else if (kind === "nail-set") {
     // Only a warning when the product is evidently a nail set that is MISSING a
     // shape. A product with no shape, style, colour or finish is an accessory —
     // a file, a remover, a glue — and has no nail shape by nature.
@@ -168,16 +183,24 @@ export function parseMetafields(raw: RawMetafields, productTitle: string): Parse
 
   return {
     attributes: {
+      kind,
       shape,
       length,
       finishes,
-      // Occasion is not stored anywhere on the store. "everyday" is the only
-      // honest default: unlike a shape, it makes no specific claim a customer
-      // could be misled by, and it only affects which queries surface a product.
-      occasions: ["everyday"] as Occasion[],
+      // Occasion is not stored anywhere on the store. For a nail set "everyday"
+      // is the only honest default: unlike a shape, it makes no specific claim a
+      // customer could be misled by, and it only affects which queries surface a
+      // product.
+      //
+      // An ACCESSORY gets nothing. A glue has no occasion and no experience
+      // level, and handing it "everyday" let a nail file score points on "what's
+      // good for every day?" — a fabricated attribute doing exactly the damage
+      // fabricated attributes do.
+      occasions: kind === "nail-set" ? (["everyday"] as Occasion[]) : [],
       // Deliberately permissive. Claiming a set is beginner-friendly when it is
       // not produces a bad first experience and a return.
-      suitableFor: ["comfortable", "experienced"] as ExperienceLevel[],
+      suitableFor:
+        kind === "nail-set" ? (["comfortable", "experienced"] as ExperienceLevel[]) : [],
       colourNotes,
       style,
     },

@@ -145,18 +145,52 @@ describe("warnings make silent merchandising bugs visible", () => {
 });
 
 describe("the few remaining defaults are chosen to be un-misleading", () => {
-  it("defaults occasion to everyday", () => {
+  it("defaults a nail set's occasion to everyday", () => {
     // Occasion is not stored anywhere on the store. Unlike shape or finish,
     // "everyday" makes no specific claim a customer could be misled by — it only
     // affects which queries surface the product. Still a default, but an honest one.
-    expect(parse({}).attributes.occasions).toEqual(["everyday"]);
+    expect(parse({ shape: "Almond" }).attributes.occasions).toEqual(["everyday"]);
   });
 
   it("does NOT default to beginner-friendly", () => {
     // Claiming a set is easy to apply when it is not produces a bad first
     // experience and a return. Claiming nothing merely means it does not surface
     // for "I'm new to this" — a much cheaper error.
-    expect(parse({}).attributes.suitableFor).not.toContain("beginner");
+    expect(parse({ shape: "Almond" }).attributes.suitableFor).not.toContain("beginner");
+  });
+
+  it("gives an accessory no occasion and no experience level at all", () => {
+    // A nail file has no occasion. Handing it "everyday" let it score points on
+    // "what's good for every day?" — a fabricated attribute doing exactly the
+    // damage fabricated attributes do.
+    const { attributes } = parse({});
+
+    expect(attributes.kind).toBe("accessory");
+    expect(attributes.occasions).toEqual([]);
+    expect(attributes.suitableFor).toEqual([]);
+  });
+});
+
+describe("classifying nail sets against accessories", () => {
+  it("treats a product with no nail attributes as an accessory", () => {
+    // Nail Remover, Glass Nail File and two glues on the live catalogue.
+    expect(parse({}).attributes.kind).toBe("accessory");
+  });
+
+  it("treats a shape-less product that has a colour as a nail set", () => {
+    // "Snowflake Wishes" — the one genuine merchandising gap. It must NOT be
+    // demoted to an accessory just because its shape metafield is unset, or it
+    // disappears from every nail query.
+    const { attributes } = parse({ colours: ["White"] });
+
+    expect(attributes.kind).toBe("nail-set");
+    expect(attributes.shape).toBeNull();
+  });
+
+  it("treats any single nail attribute as sufficient evidence", () => {
+    expect(parse({ shape: "Almond" }).attributes.kind).toBe("nail-set");
+    expect(parse({ style: "Chrome" }).attributes.kind).toBe("nail-set");
+    expect(parse({ finishes: ["Gloss"] }).attributes.kind).toBe("nail-set");
   });
 });
 
