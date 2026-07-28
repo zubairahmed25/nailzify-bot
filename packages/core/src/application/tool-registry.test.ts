@@ -29,6 +29,7 @@ const attrs: ProductAttributes = {
   occasions: ["bridal"],
   suitableFor: ["beginner"],
   colourNotes: ["warm nude"],
+  style: "Chrome",
 };
 
 function chunk(id: string, text: string, over: Partial<Chunk> = {}): Chunk {

@@ -1,35 +1,31 @@
 /**
- * Mapping Shopify product data onto our domain attributes.
+ * Mapping Shopify product metafields onto our domain attributes.
  *
  * ============================================================================
- * THE MERCHANDISING CONTRACT
+ * WHERE THE DATA ACTUALLY LIVES
  * ============================================================================
  *
- * Our domain wants structured attributes — shape, length, finish, occasion,
- * experience level. Shopify gives us `tags: [String!]!` and `productType`.
- * Something has to bridge them, and the choice is a real trade-off:
+ * Metafields, not tags. An earlier version parsed namespaced tags and reported
+ * "0/40 products tagged", which looked like a merchandising gap and was in fact
+ * the parser reading the wrong place entirely.
  *
- *   NAMESPACED TAGS  (chosen)         METAFIELDS
- *   free                              require extra token access
- *   editable in the Shopify admin     need a definition + admin setup
- *   no extra API scope                structured and validated
- *   unvalidated — a typo is silent    typo-resistant
+ *   custom.nail_text          shape     single_line_text_field   35/40
+ *   custom.nail_type          style     single_line_text_field   35/40
+ *   shopify.color-pattern     colour    list.metaobject_reference 24/40
+ *   shopify.finish            finish    list.metaobject_reference 15/40
  *
- * Tags win for a store this size: a merchandiser can add `shape:almond` while
- * editing a product, with no developer involved. That editability is worth more
- * than validation at this scale.
+ * ⚠️ TWO DIFFERENT VALUE SHAPES. The `custom.*` fields are plain strings. The
+ * `shopify.*` fields are taxonomy-backed and store METAOBJECT REFERENCES — the
+ * raw `value` is a JSON array of GIDs like ["gid://shopify/Metaobject/1002..."],
+ * and the human-readable name only appears via the resolved reference. Reading
+ * `value` directly for those would store a GID as if it were a colour.
  *
- * THE COST OF THAT CHOICE, AND HOW WE PAY IT. A typo (`shape:almnod`) leaves the
- * attribute unknown and the product quietly stops matching shape queries.
- * Nothing errors. So `parseAttributes` returns WARNINGS alongside the attributes
- * — every unparsed tag and every missing dimension. The nightly sync logs them,
- * turning an invisible merchandising bug into a report you can act on
- * (docs/10-operations.md §10.3).
+ * This adapter therefore takes RESOLVED values (see product-catalog.ts, which
+ * asks for `references { field(key: "label") }`) and normalises from there.
  *
- * A live check of the real catalogue returned `fully tagged 0/40`, which is
- * exactly the situation these warnings exist to surface.
- *
- * Migrate to metafields when the catalogue outgrows one person's attention.
+ * WHY NO DEFAULTS: an unknown attribute is `null`. See ProductAttributes — a
+ * fabricated attribute is a hallucination we manufacture ourselves, and it is
+ * the exact failure this architecture exists to prevent.
  */
 
 import type {
@@ -41,141 +37,144 @@ import type {
   ProductAttributes,
 } from "@nailzify/core";
 
-const SHAPES = ["almond", "coffin", "square", "stiletto", "oval", "squoval"] as const;
-const LENGTHS = ["short", "medium", "long", "extra-long"] as const;
-const FINISHES = ["matte", "glossy", "glitter", "chrome", "textured"] as const;
-const OCCASIONS = ["everyday", "bridal", "party", "professional", "holiday"] as const;
-const LEVELS = ["beginner", "comfortable", "experienced"] as const;
-
-/**
- * ⚠️ THERE ARE NO DEFAULTS, DELIBERATELY.
- *
- * An earlier version defaulted an untagged product to almond/medium/glossy. A
- * live check of the real catalogue found 0 of 40 products tagged — so every one
- * carried three fabricated attributes into the model's context, which it would
- * then state to a customer as fact.
- *
- * Unknown is `null`. A missing tag costs the product relevance in ranking, which
- * is the correct penalty; it must never buy the product a false claim.
- */
+/** Raw, already-resolved metafield values for one product. */
+export interface RawMetafields {
+  /** `custom.nail_text` — e.g. "Almond", "Short Almond". */
+  readonly shape: string | null;
+  /** `custom.nail_type` — e.g. "Chrome", "3D Cat-eye". */
+  readonly style: string | null;
+  /** `shopify.color-pattern`, resolved to labels — e.g. ["Pink"]. */
+  readonly colours: readonly string[];
+  /** `shopify.finish`, resolved to labels — e.g. ["Gloss"]. */
+  readonly finishes: readonly string[];
+}
 
 export interface ParsedAttributes {
   readonly attributes: ProductAttributes;
   /**
    * Merchandising problems found while parsing.
    *
-   * Not errors — the parse always succeeds. These are the observability hook
-   * that stops a silent tagging mistake from quietly degrading retrieval.
+   * Not errors — parsing always succeeds. These are the observability hook that
+   * stops an unrecognised value from silently removing a product from filtered
+   * search with nothing to indicate why.
    */
   readonly warnings: readonly string[];
 }
 
+// Derived from the live catalogue, not invented. Re-derive with
+// scripts/probe-metafields.ts when the store's vocabulary changes.
+const SHAPES: Record<string, NailShape> = {
+  almond: "almond",
+  square: "square",
+  coffin: "coffin",
+  oval: "oval",
+};
+
+const FINISHES: Record<string, NailFinish> = {
+  gloss: "gloss",
+  glossy: "gloss",
+  matte: "matte",
+  metallic: "metallic",
+};
+
+const LENGTHS: Record<string, NailLength> = {
+  short: "short",
+  medium: "medium",
+  long: "long",
+};
+
 /**
- * Parse Shopify tags into domain attributes.
+ * Colour-pattern values that are patterns rather than colours.
  *
- * Recognised tag forms (case-insensitive, whitespace tolerant):
- *
- *   shape:almond        length:short       finish:matte
- *   occasion:bridal     level:beginner     colour:warm-nude
- *
- * `color:` is accepted as a synonym for `colour:` — a US/UK spelling split is
- * exactly the kind of thing that silently loses data.
+ * `shopify.color-pattern` is one taxonomy field covering both, so "Floral" and
+ * "Geometric" arrive alongside "Pink". Both are useful for search; we just do
+ * not want a pattern presented to a customer as a colour.
  */
-export function parseAttributes(
-  tags: readonly string[],
-  productTitle: string,
-): ParsedAttributes {
+const PATTERNS = new Set(["floral", "geometric", "abstract", "striped", "animal print"]);
+
+export function parseMetafields(raw: RawMetafields, productTitle: string): ParsedAttributes {
   const warnings: string[] = [];
-  const pairs = new Map<string, string[]>();
 
-  for (const raw of tags) {
-    const tag = raw.trim().toLowerCase();
-    const separator = tag.indexOf(":");
+  // ---- shape, and the length hiding inside it ------------------------------
+  //
+  // 2 of 40 products use "Short Almond" / "Long Almond", packing two dimensions
+  // into one field. Splitting it recovers a length we would otherwise never have,
+  // since no length metafield exists at all.
+  let shape: NailShape | null = null;
+  let length: NailLength | null = null;
 
-    // Untagged free-text tags are legitimate (marketing, collections). Ignore
-    // them silently — warning on every one would bury the real signal.
-    if (separator === -1) continue;
-
-    const key = tag.slice(0, separator).trim();
-    const value = tag.slice(separator + 1).trim();
-    if (value.length === 0) {
-      warnings.push(`"${productTitle}": tag "${raw}" has an empty value`);
-      continue;
+  if (raw.shape) {
+    const words = raw.shape.trim().toLowerCase().split(/\s+/);
+    for (const word of words) {
+      if (SHAPES[word]) shape = SHAPES[word]!;
+      else if (LENGTHS[word]) length = LENGTHS[word]!;
     }
-
-    const canonical = key === "color" ? "colour" : key;
-    const existing = pairs.get(canonical);
-    if (existing) existing.push(value);
-    else pairs.set(canonical, [value]);
-  }
-
-  const single = <T extends string>(key: string, allowed: readonly T[]): T | null => {
-    const values = pairs.get(key);
-    if (!values || values.length === 0) {
-      warnings.push(`"${productTitle}": no ${key} tag — attribute left unknown`);
-      return null;
-    }
-    if (values.length > 1) {
-      warnings.push(`"${productTitle}": multiple ${key} tags (${values.join(", ")}), using first`);
-    }
-    const value = values[0]!;
-    if (!allowed.includes(value as T)) {
+    if (!shape) {
       warnings.push(
-        `"${productTitle}": unrecognised ${key} "${value}" — expected one of ${allowed.join(", ")}`,
+        `"${productTitle}": unrecognised shape "${raw.shape}" — left unknown. ` +
+          `Expected one of ${Object.keys(SHAPES).join(", ")}.`,
       );
-      return null;
     }
-    return value as T;
-  };
+  } else {
+    warnings.push(`"${productTitle}": no shape metafield (custom.nail_text)`);
+  }
 
-  const many = <T extends string>(key: string, allowed: readonly T[]): T[] => {
-    const values = pairs.get(key) ?? [];
-    const valid: T[] = [];
-    for (const value of values) {
-      if (allowed.includes(value as T)) valid.push(value as T);
-      else warnings.push(`"${productTitle}": unknown ${key} "${value}"`);
+  // ---- finish ---------------------------------------------------------------
+  let finish: NailFinish | null = null;
+  if (raw.finishes.length > 0) {
+    const first = raw.finishes[0]!.trim().toLowerCase();
+    finish = FINISHES[first] ?? null;
+    if (!finish) {
+      warnings.push(
+        `"${productTitle}": unrecognised finish "${raw.finishes[0]}" — left unknown.`,
+      );
     }
-    return valid;
-  };
-
-  const occasions = many<Occasion>("occasion", OCCASIONS);
-  const suitableFor = many<ExperienceLevel>("level", LEVELS);
-
-  if (occasions.length === 0) {
-    // Not a warning worth escalating: "everyday" is a safe, honest default for
-    // an untagged product and does not mislead a customer.
-    occasions.push("everyday");
+    if (raw.finishes.length > 1) {
+      warnings.push(
+        `"${productTitle}": multiple finishes (${raw.finishes.join(", ")}), using the first.`,
+      );
+    }
   }
-  if (suitableFor.length === 0) {
-    // Deliberately permissive. Claiming a set is beginner-friendly when it is
-    // not produces a bad first experience; claiming nothing just means the
-    // product does not surface for "I'm new to this" queries.
-    suitableFor.push("comfortable", "experienced");
-  }
+
+  // ---- colours and patterns -------------------------------------------------
+  const colourNotes = raw.colours.map((c) => c.trim()).filter(Boolean);
+
+  // ---- style ----------------------------------------------------------------
+  // Kept verbatim. Normalising "3D Cat-eye" and "Cat-eye 3D" to a canonical form
+  // would need a synonym table that rots; the embedding handles both, and the
+  // customer-facing string should be the merchandiser's own wording.
+  const style = raw.style?.trim() || null;
 
   return {
     attributes: {
-      shape: single<NailShape>("shape", SHAPES),
-      length: single<NailLength>("length", LENGTHS),
-      finish: single<NailFinish>("finish", FINISHES),
-      occasions,
-      suitableFor,
-      colourNotes: (pairs.get("colour") ?? []).map((c) => c.replace(/-/g, " ")),
+      shape,
+      length,
+      finish,
+      // Occasion is not stored anywhere on the store. "everyday" is the only
+      // honest default: unlike a shape, it makes no specific claim a customer
+      // could be misled by, and it only affects which queries surface a product.
+      occasions: ["everyday"] as Occasion[],
+      // Deliberately permissive. Claiming a set is beginner-friendly when it is
+      // not produces a bad first experience and a return.
+      suitableFor: ["comfortable", "experienced"] as ExperienceLevel[],
+      colourNotes,
+      style,
     },
     warnings,
   };
 }
 
+/** True when a colour-pattern value describes a pattern rather than a colour. */
+export const isPattern = (value: string): boolean => PATTERNS.has(value.trim().toLowerCase());
+
 /**
- * The text that gets embedded for the product semantic index.
+ * The text embedded for the product semantic index.
  *
  * ⚠️ NOTE WHAT IS ABSENT: no price, no inventory, no variant SKUs. Only stable
- * descriptive text. This is the two-plane rule at the ingestion boundary — a
- * vector must never encode a fact that can change without the document changing
- * (docs/01-architecture.md §1.2).
+ * descriptive text — the two-plane rule at the ingestion boundary.
  *
- * If you are tempted to add price here "so semantic search understands budget",
- * don't. That is what `priceBand` metadata and live hydration are for.
+ * Unknown attributes are omitted rather than guessed, so a vector never encodes
+ * a property the product may not have.
  */
 export function productEmbeddingText(input: {
   readonly title: string;
@@ -183,19 +182,21 @@ export function productEmbeddingText(input: {
   readonly productType: string;
   readonly attributes: ProductAttributes;
 }): string {
-  const { attributes: a } = input;
+  const a = input.attributes;
+  const colours = a.colourNotes.filter((c) => !isPattern(c));
+  const patterns = a.colourNotes.filter(isPattern);
+
   return [
     input.title,
     input.productType,
     input.description,
-    // Only assert what we actually know — an unknown attribute is omitted, not
-    // guessed, so the vector never encodes a fabricated property either.
     a.shape ? `Shape: ${a.shape}` : "",
     a.length ? `Length: ${a.length}` : "",
     a.finish ? `Finish: ${a.finish}` : "",
-    `Occasions: ${a.occasions.join(", ")}`,
-    `Suitable for: ${a.suitableFor.join(", ")}`,
-    a.colourNotes.length > 0 ? `Colours: ${a.colourNotes.join(", ")}` : "",
+    // The dimension customers actually search by — "chrome nails", "french tips".
+    a.style ? `Style: ${a.style}` : "",
+    colours.length > 0 ? `Colours: ${colours.join(", ")}` : "",
+    patterns.length > 0 ? `Pattern: ${patterns.join(", ")}` : "",
   ]
     .filter((line) => line.length > 0)
     .join("\n");

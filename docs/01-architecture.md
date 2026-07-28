@@ -59,7 +59,7 @@ Split retrieval by **volatility of the underlying data**.
 ┌──────────────────── CATALOG PLANE (fast-changing) ──────────────────────┐
 │  Shopify products                                                        │
 │      ↓ nightly sync: embed ONLY stable descriptive text                  │
-│        (title, description, shape, length, style, occasion, tags)        │
+│      (title, description, shape, length, style, colour, finish)         │
 │  Pinecone namespace: "products"                                          │
 │      ↓ semantic search → returns PRODUCT IDs ONLY, never prices          │
 │      ↓                                                                   │

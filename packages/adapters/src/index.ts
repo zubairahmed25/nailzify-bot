@@ -32,9 +32,11 @@ export {
   type ShopifyProductCatalogConfig,
 } from "./shopify/product-catalog.js";
 export {
-  parseAttributes,
+  parseMetafields,
   productEmbeddingText,
+  isPattern,
   type ParsedAttributes,
+  type RawMetafields,
 } from "./shopify/attributes.js";
 export {
   createDynamoConversationRepo,

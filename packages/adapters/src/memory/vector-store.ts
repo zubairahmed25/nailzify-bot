@@ -31,16 +31,13 @@ import type {
   VectorStore,
 } from "@nailzify/core";
 import {
+  productAttributesFromMetadata,
   ChunkId,
   DocumentId,
   ProductId,
   type Chunk,
   type DocType,
-  type NailLength,
-  type NailShape,
-  type Occasion,
   type PriceBand,
-  type ProductAttributes,
 } from "@nailzify/core";
 
 type Store = Map<Namespace, Map<string, VectorRecord>>;
@@ -193,14 +190,11 @@ function toScoredChunk(record: VectorRecord, score: number): ScoredChunk {
 function toProductCandidate(record: VectorRecord, score: number): ProductCandidate {
   const m = record.metadata;
 
-  const attributes: ProductAttributes = {
-    shape: (str(m, "shape") || null) as NailShape | null,
-    length: (str(m, "length") || null) as NailLength | null,
-    finish: (str(m, "finish") || null) as ProductAttributes["finish"],
-    occasions: strArray(m, "occasions") as Occasion[],
-    suitableFor: strArray(m, "suitableFor") as ProductAttributes["suitableFor"],
-    colourNotes: strArray(m, "colourNotes"),
-  };
+  // Key names come from core so the writer and this reader cannot drift apart.
+  const attributes = productAttributesFromMetadata({
+    str: (k) => str(m, k),
+    strArray: (k) => [...strArray(m, k)],
+  });
 
   return {
     productId: ProductId(str(m, "productId", record.id)),

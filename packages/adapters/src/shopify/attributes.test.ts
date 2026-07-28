@@ -1,103 +1,125 @@
 import { describe, expect, it } from "vitest";
-import { parseAttributes, productEmbeddingText } from "./attributes.js";
+import { parseMetafields, productEmbeddingText, type RawMetafields } from "./attributes.js";
 
-const parse = (tags: string[]) => parseAttributes(tags, "Test Product");
+const parse = (raw: Partial<RawMetafields>) =>
+  parseMetafields(
+    { shape: null, style: null, colours: [], finishes: [], ...raw },
+    "Test Product",
+  );
 
-describe("parsing namespaced tags", () => {
+describe("parsing metafields", () => {
   it("reads the core dimensions", () => {
-    const { attributes } = parse(["shape:almond", "length:short", "finish:matte"]);
+    const { attributes } = parse({
+      shape: "Almond",
+      style: "Chrome",
+      finishes: ["Matte"],
+      colours: ["Pink"],
+    });
 
     expect(attributes.shape).toBe("almond");
-    expect(attributes.length).toBe("short");
     expect(attributes.finish).toBe("matte");
+    expect(attributes.style).toBe("Chrome");
+    expect(attributes.colourNotes).toEqual(["Pink"]);
   });
 
   it("is case and whitespace tolerant", () => {
     // Merchandisers type these by hand in the Shopify admin.
-    const { attributes } = parse(["  Shape: Almond  ", "LENGTH:SHORT"]);
+    const { attributes } = parse({ shape: "  ALMOND ", finishes: [" Gloss "] });
 
     expect(attributes.shape).toBe("almond");
-    expect(attributes.length).toBe("short");
+    expect(attributes.finish).toBe("gloss");
   });
 
-  it("accepts both colour and color", () => {
-    // A US/UK spelling split is exactly the kind of thing that silently loses
-    // data, so both are canonicalised.
-    expect(parse(["colour:warm-nude"]).attributes.colourNotes).toEqual(["warm nude"]);
-    expect(parse(["color:warm-nude"]).attributes.colourNotes).toEqual(["warm nude"]);
+  it("splits a length out of a compound shape value", () => {
+    // 2 of 40 live products pack two dimensions into custom.nail_text as
+    // "Short Almond" / "Long Almond". There is no length metafield at all, so
+    // this is the only place a length can come from.
+    const shortAlmond = parse({ shape: "Short Almond" }).attributes;
+    expect(shortAlmond.shape).toBe("almond");
+    expect(shortAlmond.length).toBe("short");
+
+    const longAlmond = parse({ shape: "Long Almond" }).attributes;
+    expect(longAlmond.shape).toBe("almond");
+    expect(longAlmond.length).toBe("long");
   });
 
-  it("collects repeatable dimensions", () => {
-    const { attributes } = parse(["occasion:bridal", "occasion:party", "level:beginner"]);
-
-    expect(attributes.occasions).toEqual(["bridal", "party"]);
-    expect(attributes.suitableFor).toEqual(["beginner"]);
+  it("leaves length null when the shape field carries only a shape", () => {
+    // The common case — 33 of the 35 products with a shape. Length is genuinely
+    // unknown, and unknown must not become a guess.
+    expect(parse({ shape: "Coffin" }).attributes.length).toBeNull();
   });
 
-  it("ignores untagged marketing tags without complaining", () => {
-    // Warning on every free-text tag would bury the real signal.
-    const { warnings } = parse([
-      "shape:almond",
-      "length:short",
-      "finish:matte",
-      "bestseller",
-      "new-in",
-    ]);
+  it("treats glossy as gloss", () => {
+    expect(parse({ finishes: ["Glossy"] }).attributes.finish).toBe("gloss");
+  });
 
-    expect(warnings.filter((w) => w.includes("bestseller"))).toHaveLength(0);
+  it("keeps style verbatim rather than normalising it", () => {
+    // "3D Cat-eye" and "Cat-eye 3D" both exist live. Canonicalising them needs a
+    // synonym table that rots; the embedding handles both, and the customer
+    // should see the merchandiser's own wording.
+    expect(parse({ style: "3D Cat-eye" }).attributes.style).toBe("3D Cat-eye");
+    expect(parse({ style: "Cat-eye 3D" }).attributes.style).toBe("Cat-eye 3D");
   });
 });
 
 describe("warnings make silent merchandising bugs visible", () => {
-  it("leaves a typo'd attribute UNKNOWN rather than guessing", () => {
+  it("leaves an unrecognised shape UNKNOWN rather than guessing", () => {
     // THE BUG A LIVE CATALOGUE CHECK CAUGHT. This used to fall back to "almond",
-    // so the model was handed a fabricated fact and would state it to a customer
-    // as truth. Parse still succeeds — but it must not invent.
-    const { attributes, warnings } = parse(["shape:almnod", "length:short", "finish:matte"]);
+    // so the model was handed a fabricated fact and stated it to a customer as
+    // truth. Parsing still succeeds — but it must not invent.
+    const { attributes, warnings } = parse({ shape: "Almnod" });
 
     expect(attributes.shape).toBeNull();
-    expect(warnings.some((w) => w.includes("almnod"))).toBe(true);
+    expect(warnings.some((w) => w.includes("Almnod"))).toBe(true);
   });
 
-  it("warns on a missing dimension and leaves it null", () => {
-    const { attributes, warnings } = parse(["shape:almond"]);
+  it("warns when the shape metafield is missing entirely", () => {
+    // 5 of 40 live products. Silence here would make a gap invisible.
+    const { attributes, warnings } = parse({});
 
-    expect(attributes.length).toBeNull();
-    expect(attributes.finish).toBeNull();
-    expect(warnings.some((w) => w.includes("no length tag"))).toBe(true);
-    expect(warnings.some((w) => w.includes("no finish tag"))).toBe(true);
+    expect(attributes.shape).toBeNull();
+    expect(warnings.some((w) => w.includes("custom.nail_text"))).toBe(true);
   });
 
-  it("invents nothing for a completely untagged product", () => {
-    // The live catalogue reported `fully tagged 0/40`, so this is the common
-    // case, not an edge case.
-    const { attributes } = parse(["bestseller", "new-in"]);
+  it("invents nothing for a product with no metafields at all", () => {
+    const { attributes } = parse({});
 
     expect(attributes.shape).toBeNull();
     expect(attributes.length).toBeNull();
     expect(attributes.finish).toBeNull();
+    expect(attributes.style).toBeNull();
+    expect(attributes.colourNotes).toEqual([]);
   });
 
-  it("warns on conflicting tags and uses the first", () => {
-    const { attributes, warnings } = parse(["shape:almond", "shape:square"]);
+  it("warns on an unrecognised finish and leaves it null", () => {
+    const { attributes, warnings } = parse({ finishes: ["Holographic"] });
 
-    expect(attributes.shape).toBe("almond");
-    expect(warnings.some((w) => w.includes("multiple shape"))).toBe(true);
+    expect(attributes.finish).toBeNull();
+    expect(warnings.some((w) => w.includes("Holographic"))).toBe(true);
   });
 
-  it("warns on an empty value", () => {
-    const { warnings } = parse(["shape:"]);
-    expect(warnings.some((w) => w.includes("empty value"))).toBe(true);
+  it("warns when multiple finishes are set and uses the first", () => {
+    const { attributes, warnings } = parse({ finishes: ["Matte", "Gloss"] });
+
+    expect(attributes.finish).toBe("matte");
+    expect(warnings.some((w) => w.includes("multiple finishes"))).toBe(true);
   });
 
-  it("produces no warnings for a fully tagged product", () => {
-    const { warnings } = parse([
-      "shape:almond",
-      "length:short",
-      "finish:matte",
-      "occasion:everyday",
-      "level:beginner",
-    ]);
+  it("stays quiet for a fully populated product", () => {
+    const { warnings } = parse({
+      shape: "Almond",
+      style: "Chrome",
+      colours: ["Pink"],
+      finishes: ["Gloss"],
+    });
+
+    expect(warnings).toEqual([]);
+  });
+
+  it("does not warn about a missing finish", () => {
+    // Only 15 of 40 products carry one. Warning on the other 25 would bury the
+    // signal that actually matters — a shape that failed to parse.
+    const { warnings } = parse({ shape: "Almond" });
 
     expect(warnings).toEqual([]);
   });
@@ -105,28 +127,27 @@ describe("warnings make silent merchandising bugs visible", () => {
 
 describe("the few remaining defaults are chosen to be un-misleading", () => {
   it("defaults occasion to everyday", () => {
-    // Unlike shape/length/finish, "everyday" makes no specific claim a customer
-    // could be misled by — it only affects which queries the product surfaces
-    // for. Still a default, but an honest one.
-    expect(parse([]).attributes.occasions).toEqual(["everyday"]);
+    // Occasion is not stored anywhere on the store. Unlike shape or finish,
+    // "everyday" makes no specific claim a customer could be misled by — it only
+    // affects which queries surface the product. Still a default, but an honest one.
+    expect(parse({}).attributes.occasions).toEqual(["everyday"]);
   });
 
   it("does NOT default to beginner-friendly", () => {
     // Claiming a set is easy to apply when it is not produces a bad first
-    // experience and a return. Claiming nothing merely means it does not
-    // surface for "I'm new to this" — a much cheaper error.
-    expect(parse([]).attributes.suitableFor).not.toContain("beginner");
+    // experience and a return. Claiming nothing merely means it does not surface
+    // for "I'm new to this" — a much cheaper error.
+    expect(parse({}).attributes.suitableFor).not.toContain("beginner");
   });
 });
 
 describe("productEmbeddingText", () => {
-  const attributes = parse([
-    "shape:almond",
-    "length:short",
-    "finish:matte",
-    "occasion:bridal",
-    "colour:warm-nude",
-  ]).attributes;
+  const attributes = parse({
+    shape: "Short Almond",
+    style: "Chrome",
+    colours: ["Pink", "Floral"],
+    finishes: ["Matte"],
+  }).attributes;
 
   const text = productEmbeddingText({
     title: "Autumn Almond",
@@ -138,12 +159,32 @@ describe("productEmbeddingText", () => {
   it("includes descriptive attributes", () => {
     expect(text).toContain("Autumn Almond");
     expect(text).toContain("Shape: almond");
-    expect(text).toContain("warm nude");
+    expect(text).toContain("Length: short");
+    expect(text).toContain("Style: Chrome");
+  });
+
+  it("separates patterns from colours", () => {
+    // shopify.color-pattern is one taxonomy field covering both, so "Floral"
+    // arrives alongside "Pink". Both help retrieval; only one is a colour.
+    expect(text).toContain("Colours: Pink");
+    expect(text).toContain("Pattern: Floral");
+  });
+
+  it("omits unknown attributes instead of guessing", () => {
+    const sparse = productEmbeddingText({
+      title: "Mystery Set",
+      description: "",
+      productType: "Press-on Nails",
+      attributes: parse({}).attributes,
+    });
+
+    expect(sparse).not.toContain("Shape:");
+    expect(sparse).not.toContain("Finish:");
   });
 
   it("contains NO price and NO inventory", () => {
-    // The two-plane rule at the ingestion boundary. A vector must never encode
-    // a fact that can change without the document changing.
+    // The two-plane rule at the ingestion boundary. A vector must never encode a
+    // fact that can change without the document changing.
     expect(text).not.toMatch(/\$|price|USD|\d+\.\d{2}/i);
     expect(text).not.toMatch(/stock|inventory|available|quantity/i);
   });

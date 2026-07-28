@@ -402,8 +402,8 @@ the maximum blast radius of a prompt-injection attack.
       "type": "object",
       "properties": {
         "query":     { "type": "string" },
-        "shape":     { "type": "string", "enum": ["almond","coffin","square","stiletto","oval","squoval"] },
-        "length":    { "type": "string", "enum": ["short","medium","long","extra-long"] },
+        "shape":     { "type": "string", "enum": ["almond","coffin","square","oval"] },
+        "length":    { "type": "string", "enum": ["short","medium","long"] },
         "occasion":  { "type": "string", "enum": ["everyday","bridal","party","professional","holiday"] },
         "maxPrice":  { "type": "number" },
         "style":     { "type": "string" }
@@ -548,3 +548,43 @@ it's an overconfident one. Some non-zero abstention rate is a health signal, not
 ---
 
 Next: [Phase 5 — Chat request lifecycle](05-chat-lifecycle.md)
+
+---
+
+## Postscript: where product attributes actually live
+
+The filter enums above are narrower than they were in the first draft, and the
+reason is worth recording because it is the same mistake twice.
+
+**Attributes are in metafields, not tags.** The first implementation parsed
+namespaced tags (`shape:almond`) and a live catalogue check reported *"fully
+tagged 0/40"*. That looked like a merchandising gap — a note to the store owner
+to go and tag 40 products. It was not. The parser was reading the wrong place
+entirely:
+
+| Metafield | Meaning | Type | Coverage |
+| --- | --- | --- | --- |
+| `custom.nail_text` | shape | `single_line_text_field` | 35/40 |
+| `custom.nail_type` | style | `single_line_text_field` | 35/40 |
+| `shopify.color-pattern` | colour | `list.metaobject_reference` | 24/40 |
+| `shopify.finish` | finish | `list.metaobject_reference` | 15/40 |
+
+Two different value shapes. The `custom.*` fields are plain strings. The
+`shopify.*` fields are taxonomy-backed and store **metaobject references** — the
+raw `value` is a JSON array of GIDs like `["gid://shopify/Metaobject/100210"]`,
+and the human-readable label only exists via the resolved reference. Reading
+`value` directly would have stored a GID where a colour belongs.
+
+**The enums were invented.** `stiletto`, `squoval` and `extra-long` were in the
+first draft because they are what a press-on nail catalogue *usually* contains.
+Nailzify sells almond, square, coffin and oval, in short, medium and long. An
+enum the store cannot satisfy is not harmless: it lets the model filter on
+`stiletto`, receive nothing, and then have to explain an absence — which is an
+invitation to invent a reason.
+
+**Length has no metafield at all.** It is recovered from the 2 products whose
+shape field reads `"Short Almond"` / `"Long Almond"`, and is `null` for the rest.
+Null, not a default — see the fabrication note in Phase 3.
+
+The general lesson: **the shape of the data is an empirical question.** Every
+assumption in this doc that survived was one that got measured.

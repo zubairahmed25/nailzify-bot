@@ -42,7 +42,7 @@ export interface CustomerPreferences {
   readonly occasion?: Occasion;
   readonly experience?: ExperienceLevel;
   readonly maxPrice?: Money;
-  /** Free-text style/colour cues, matched loosely against colour notes. */
+  /** Free-text cues, matched loosely against colour, finish and style. */
   readonly styleNotes?: readonly string[];
 }
 
@@ -77,17 +77,22 @@ const WEIGHT = {
   style: 0.1,
 } as const;
 
-/** Shapes that read as visually adjacent, so a near-miss still partly counts. */
+/**
+ * Shapes that read as visually adjacent, so a near-miss still partly counts.
+ *
+ * Only the four shapes Nailzify actually sells. Squoval and stiletto used to
+ * appear here as bridging entries; both were invented before anyone looked at
+ * the store, so their removal leaves almond↔oval (both tapered, rounded tip)
+ * and coffin↔square (both flat-tipped) as the real neighbour pairs.
+ */
 const ADJACENT_SHAPES: Readonly<Record<NailShape, readonly NailShape[]>> = {
-  almond: ["oval", "squoval"],
-  oval: ["almond", "squoval"],
-  squoval: ["oval", "square"],
-  square: ["squoval"],
-  coffin: ["stiletto", "squoval"],
-  stiletto: ["coffin", "almond"],
+  almond: ["oval"],
+  oval: ["almond"],
+  square: ["coffin"],
+  coffin: ["square", "almond"],
 };
 
-const LENGTH_ORDER: readonly NailLength[] = ["short", "medium", "long", "extra-long"];
+const LENGTH_ORDER: readonly NailLength[] = ["short", "medium", "long"];
 
 function lengthDistance(a: NailLength, b: NailLength): number {
   return Math.abs(LENGTH_ORDER.indexOf(a) - LENGTH_ORDER.indexOf(b));
@@ -193,7 +198,13 @@ function score(product: Product, prefs: CustomerPreferences): Recommendation {
 
   if (prefs.styleNotes?.length) {
     possible += WEIGHT.style;
-    const haystack = [...attrs.colourNotes, attrs.finish].join(" ").toLowerCase();
+    // `style` (Shopify custom.nail_type) belongs in here: "chrome", "french",
+    // "cat-eye" are how customers describe what they want, and that field is the
+    // only place those words live. Omitting it made 35 of 40 products
+    // unreachable by the phrasing customers actually use.
+    const haystack = [...attrs.colourNotes, attrs.finish, attrs.style]
+      .join(" ")
+      .toLowerCase();
     const hits = prefs.styleNotes.filter((note) => haystack.includes(note.toLowerCase()));
     if (hits.length > 0) {
       earned += WEIGHT.style * (hits.length / prefs.styleNotes.length);
@@ -219,63 +230,163 @@ function score(product: Product, prefs: CustomerPreferences): Recommendation {
 // ---------------------------------------------------------------------------
 
 /**
- * Standard press-on size numbering, widest nail bed first.
+ * Nailzify's own size chart, transcribed from the published size guide.
+ *
+ * ⚠️ THIS IS A SET-BASED MODEL, NOT THE INDUSTRY ONE. An earlier version of this
+ * file implemented the generic press-on model — individual nail sizes 0–11, one
+ * size per finger — which is what most press-on brands use and what a model
+ * asked to "size press-on nails" will confidently produce. Nailzify does not
+ * sell that. A set is XS, S, M or L, and every set contains all five fingers at
+ * fixed widths. Recommending "size 4" here would be a fluent, well-reasoned
+ * answer to a question about a different shop.
  *
  * WHY THIS IS IN CODE AND NOT THE PROMPT: a model asked to do arithmetic on
  * measurements will usually get it right, and "usually" is the problem. A
  * customer who receives nails that don't fit has a returns case and a bad
  * experience. Deterministic logic is the correct tool for a deterministic
  * question.
+ *
+ * Source: data/documents/size-guide.md → nailzify.com/pages/size-guide-for-handmade-nails
  */
-const SIZE_TABLE_MM: readonly { size: number; widthMm: number }[] = [
-  { size: 0, widthMm: 15.9 },
-  { size: 1, widthMm: 14.3 },
-  { size: 2, widthMm: 13.5 },
-  { size: 3, widthMm: 12.7 },
-  { size: 4, widthMm: 11.9 },
-  { size: 5, widthMm: 11.1 },
-  { size: 6, widthMm: 10.3 },
-  { size: 7, widthMm: 9.5 },
-  { size: 8, widthMm: 8.7 },
-  { size: 9, widthMm: 7.9 },
-  { size: 10, widthMm: 7.0 },
-  { size: 11, widthMm: 6.2 },
-];
+export type SetSize = "XS" | "S" | "M" | "L";
+export type Finger = "thumb" | "index" | "middle" | "ring" | "little";
+
+/** Ordered smallest to largest — index position is the step distance. */
+const SET_ORDER: readonly SetSize[] = ["XS", "S", "M", "L"];
+
+const SIZE_CHART_MM: Readonly<Record<SetSize, Readonly<Record<Finger, number>>>> = {
+  XS: { thumb: 14, index: 10, middle: 11, ring: 10, little: 8 },
+  S: { thumb: 15, index: 11, middle: 12, ring: 11, little: 9 },
+  M: { thumb: 16, index: 12, middle: 13, ring: 12, little: 10 },
+  L: { thumb: 17, index: 13, middle: 14, ring: 13, little: 11 },
+};
+
+/** A measurement in millimetres for each finger the customer actually measured. */
+export type NailMeasurements = Partial<Record<Finger, number>>;
 
 export interface SizeRecommendation {
-  readonly size: number;
-  readonly widthMm: number;
-  /** True when the measurement sits awkwardly between two sizes. */
-  readonly betweenSizes: boolean;
+  readonly size: SetSize;
+  /** Per-finger set size implied by each measurement, before aggregation. */
+  readonly perFinger: Readonly<Partial<Record<Finger, SetSize>>>;
+  /**
+   * True when the measured fingers do not agree on one set.
+   *
+   * Worth surfacing rather than hiding: it means no single set fits every
+   * finger well, and the customer should hear that from us instead of
+   * discovering it on delivery.
+   */
+  readonly mixed: boolean;
+  /**
+   * True when a measurement fell outside the chart entirely — wider than L or
+   * narrower than XS. Clamped, but the customer needs to know it was clamped.
+   */
+  readonly outOfRange: boolean;
+  /** Plain-language rationale the model can quote verbatim. */
+  readonly reasons: readonly string[];
 }
 
 /**
- * Nearest press-on size for a measured nail bed width.
+ * Recommend a set size from one or more measured nail widths.
  *
- * Ties round to the LARGER nail (lower size number). A slightly oversized
- * press-on can be filed down; an undersized one exposes the natural nail edge
- * and lifts early. When rounding is ambiguous, pick the recoverable error.
+ * ROUNDS UP, ALWAYS. Not to nearest. The store's own guidance is to size up by
+ * 1–2mm because a wide press-on can be filed down while a narrow one exposes
+ * the natural nail edge and lifts early. Nearest-match would round a 12.4mm
+ * middle finger down to M (13mm... no) — the asymmetry is deliberate, so the
+ * error we make is always the recoverable one.
  */
-export function recommendSize(widthMm: number): SizeRecommendation {
-  if (!Number.isFinite(widthMm) || widthMm <= 0) {
-    throw new TypeError(`Nail bed width must be a positive number, received ${widthMm}`);
+export function recommendSetSize(measurements: NailMeasurements): SizeRecommendation {
+  const entries = Object.entries(measurements) as [Finger, number | undefined][];
+  const measured = entries.filter((e): e is [Finger, number] => typeof e[1] === "number");
+
+  if (measured.length === 0) {
+    throw new TypeError("At least one finger measurement is required.");
   }
-
-  let best = SIZE_TABLE_MM[0]!;
-  let bestDelta = Math.abs(best.widthMm - widthMm);
-
-  for (const entry of SIZE_TABLE_MM) {
-    const delta = Math.abs(entry.widthMm - widthMm);
-    // Strict `<` keeps the earlier (larger-nail) entry on an exact tie.
-    if (delta < bestDelta) {
-      best = entry;
-      bestDelta = delta;
+  for (const [finger, mm] of measured) {
+    if (!Number.isFinite(mm) || mm <= 0) {
+      throw new TypeError(`${finger} width must be a positive number, received ${mm}`);
     }
   }
 
-  // Steps in the table are ~0.8mm, so a delta above 0.35mm means the measurement
-  // sits near a boundary and the customer should be told rather than guessed at.
-  return { size: best.size, widthMm: best.widthMm, betweenSizes: bestDelta > 0.35 };
+  const perFinger: Partial<Record<Finger, SetSize>> = {};
+  const reasons: string[] = [];
+  let outOfRange = false;
+
+  for (const [finger, mm] of measured) {
+    // Smallest set whose nail for THIS finger is at least as wide as the
+    // measurement. Never narrower — see the round-up rule above.
+    const fit = SET_ORDER.find((size) => SIZE_CHART_MM[size][finger] >= mm);
+
+    if (fit) {
+      perFinger[finger] = fit;
+    } else {
+      // Wider than the widest set. Clamping to L is the only thing we can sell,
+      // but saying so is mandatory — the alternative is a customer who ordered
+      // on our advice and received nails that do not fit.
+      perFinger[finger] = "L";
+      outOfRange = true;
+      reasons.push(
+        `Your ${finger} measures ${mm}mm, wider than the ${SIZE_CHART_MM.L[finger]}mm ` +
+          `${finger} in our largest set (L). L is the closest we make.`,
+      );
+    }
+  }
+
+  const chosen = aggregate(perFinger);
+  const distinct = new Set(Object.values(perFinger));
+  const mixed = distinct.size > 1;
+
+  if (mixed) {
+    const spread = [...distinct].sort(
+      (a, b) => SET_ORDER.indexOf(a) - SET_ORDER.indexOf(b),
+    );
+    reasons.push(
+      `Your measurements span ${spread.join(" and ")}. ${chosen} fits the most fingers; ` +
+        `any that come out slightly wide can be filed down.`,
+    );
+  } else {
+    reasons.push(`All the fingers you measured fall within our ${chosen} set.`);
+  }
+
+  reasons.push(
+    "We recommend sizing up 1–2mm if you are between sizes — you can file a set " +
+      "down to fit, but you cannot make it larger.",
+  );
+
+  return { size: chosen, perFinger, mixed, outOfRange, reasons };
+}
+
+/**
+ * Collapse per-finger sizes into one set.
+ *
+ * Majority wins, because that is the store's published rule ("the size that best
+ * matches the majority of your fingernails"). Ties break LARGER, because that is
+ * the store's other published rule ("go with the larger size if you're uncertain")
+ * and because it keeps the round-up asymmetry intact through aggregation.
+ */
+function aggregate(perFinger: Partial<Record<Finger, SetSize>>): SetSize {
+  const counts = new Map<SetSize, number>();
+  for (const size of Object.values(perFinger)) {
+    counts.set(size, (counts.get(size) ?? 0) + 1);
+  }
+
+  let best: SetSize = SET_ORDER[0]!;
+  let bestCount = -1;
+
+  for (const size of SET_ORDER) {
+    const count = counts.get(size) ?? 0;
+    // `>=` walking smallest→largest means an equal count prefers the LARGER set.
+    if (count > 0 && count >= bestCount) {
+      best = size;
+      bestCount = count;
+    }
+  }
+
+  return best;
+}
+
+/** The published chart, for rendering back to a customer who asks to see it. */
+export function sizeChart(): Readonly<Record<SetSize, Readonly<Record<Finger, number>>>> {
+  return SIZE_CHART_MM;
 }
 
 /** Human-readable label for an experience level, for use in generated copy. */

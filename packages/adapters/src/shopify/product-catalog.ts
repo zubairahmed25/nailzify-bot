@@ -18,7 +18,7 @@ import {
   type Product,
   type ProductVariant,
 } from "@nailzify/core";
-import { parseAttributes } from "./attributes.js";
+import { parseMetafields, type RawMetafields } from "./attributes.js";
 import type { StorefrontClient } from "./storefront-client.js";
 
 /** `nodes(ids:)` accepts at most 250. We batch well under it. */
@@ -49,6 +49,22 @@ const PRODUCT_FIELDS = `
   onlineStoreUrl
   featuredImage { url }
   priceRange { minVariantPrice { amount currencyCode } }
+  metafields(identifiers: [
+    { namespace: "custom",  key: "nail_text" },
+    { namespace: "custom",  key: "nail_type" },
+    { namespace: "shopify", key: "color-pattern" },
+    { namespace: "shopify", key: "finish" }
+  ]) {
+    namespace
+    key
+    value
+    # shopify.* fields are taxonomy-backed: their value is a JSON array of
+    # metaobject GIDs, so the readable label only exists here. Reading value
+    # directly would store a gid:// string as if it were a colour.
+    references(first: 5) {
+      nodes { ... on Metaobject { field(key: "label") { value } } }
+    }
+  }
   variants(first: ${VARIANT_LIMIT}) {
     nodes {
       title
@@ -91,6 +107,13 @@ interface RawMoney {
   readonly currencyCode: string;
 }
 
+interface RawMetafield {
+  readonly namespace: string;
+  readonly key: string;
+  readonly value: string;
+  readonly references: { readonly nodes: { readonly field: { readonly value: string } | null }[] } | null;
+}
+
 interface RawProduct {
   readonly id: string;
   readonly handle: string;
@@ -102,6 +125,8 @@ interface RawProduct {
   readonly onlineStoreUrl: string | null;
   readonly featuredImage: { readonly url: string } | null;
   readonly priceRange: { readonly minVariantPrice: RawMoney };
+  /** Aligned with the identifiers above; entries are null when unset. */
+  readonly metafields?: readonly (RawMetafield | null)[];
   readonly variants: {
     readonly nodes: readonly {
       readonly title: string;
@@ -186,7 +211,7 @@ function toProduct(
   storefrontDomain: string,
   warn: (warning: string) => void,
 ): Product {
-  const { attributes, warnings } = parseAttributes(raw.tags, raw.title);
+  const { attributes, warnings } = parseMetafields(toRawMetafields(raw.metafields), raw.title);
   for (const warning of warnings) warn(warning);
 
   const variants: ProductVariant[] = raw.variants.nodes.map((v) => ({
@@ -212,6 +237,36 @@ function toProduct(
     attributes,
     // Stamped so a stale hydration is detectable rather than assumed fresh.
     fetchedAt: Date.now(),
+  };
+}
+
+/**
+ * Pull the four metafields into a shape the parser understands.
+ *
+ * Matched by namespace+key rather than array position. The API returns entries
+ * positionally aligned with the identifiers we sent, but relying on that makes
+ * reordering the query a silent data-corruption bug rather than a compile error.
+ */
+function toRawMetafields(metafields: readonly (RawMetafield | null)[] | undefined): RawMetafields {
+  // Tolerate the field being absent, not just its entries being null. Throwing
+  // here would fail the whole hydration batch, and the tool registry reports a
+  // failed batch to the customer as "we don't sell that" — a missing metafield
+  // must degrade to "attribute unknown", which is what the parser already does.
+  const list = metafields ?? [];
+  const find = (namespace: string, key: string) =>
+    list.find((m) => m?.namespace === namespace && m.key === key) ?? null;
+
+  /** Resolved labels for a reference-typed field. */
+  const labels = (m: RawMetafield | null): string[] =>
+    (m?.references?.nodes ?? [])
+      .map((n) => n.field?.value)
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+
+  return {
+    shape: find("custom", "nail_text")?.value?.trim() || null,
+    style: find("custom", "nail_type")?.value?.trim() || null,
+    colours: labels(find("shopify", "color-pattern")),
+    finishes: labels(find("shopify", "finish")),
   };
 }
 

@@ -88,11 +88,15 @@ export const TOOLS: readonly ToolDefinition[] = [
           type: "string",
           description: "Natural-language description of what the customer is looking for.",
         },
+        // Only the four shapes and three lengths Nailzify actually sells.
+        // Offering "stiletto" here would let the model filter on it, get an
+        // empty result, and then have to explain an absence — inviting it to
+        // invent a reason. An enum the store cannot satisfy is a trap.
         shape: {
           type: "string",
-          enum: ["almond", "coffin", "square", "stiletto", "oval", "squoval"],
+          enum: ["almond", "coffin", "square", "oval"],
         },
-        length: { type: "string", enum: ["short", "medium", "long", "extra-long"] },
+        length: { type: "string", enum: ["short", "medium", "long"] },
         occasion: {
           type: "string",
           enum: ["everyday", "bridal", "party", "professional", "holiday"],
@@ -111,7 +115,10 @@ export const TOOLS: readonly ToolDefinition[] = [
         styleNotes: {
           type: "array",
           items: { type: "string" },
-          description: "Colour or finish cues, e.g. ['terracotta', 'matte'].",
+          description:
+            "Colour, finish or style cues, e.g. ['pink', 'matte', 'chrome', 'cat-eye']. " +
+            "Style is the dimension customers most often name — put words like " +
+            "'chrome', 'french', 'ombre' or 'glitter' here rather than in shape.",
         },
       },
       required: ["query"],

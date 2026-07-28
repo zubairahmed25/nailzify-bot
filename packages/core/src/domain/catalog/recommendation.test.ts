@@ -3,7 +3,7 @@ import { ProductHandle, ProductId } from "../shared/brand.js";
 import { money } from "../shared/money.js";
 import type { Product, ProductAttributes, ProductCandidate } from "./product.js";
 import { hydrate } from "./product.js";
-import { recommendSize, selectRecommendations } from "./recommendation.js";
+import { recommendSetSize, selectRecommendations } from "./recommendation.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -21,6 +21,7 @@ const baseAttributes: ProductAttributes = {
   occasions: ["everyday", "professional"],
   suitableFor: ["beginner", "comfortable"],
   colourNotes: ["warm nude"],
+  style: "Chrome",
 };
 
 function product(id: string, overrides: Partial<Omit<Product, "id">> = {}): Product {
@@ -170,11 +171,11 @@ describe("selectRecommendations", () => {
     const matte = product("matte", {
       attributes: { ...baseAttributes, finish: "matte", colourNotes: ["terracotta"] },
     });
-    const glitter = product("glitter", {
-      attributes: { ...baseAttributes, finish: "glitter", colourNotes: ["silver"] },
+    const gloss = product("gloss", {
+      attributes: { ...baseAttributes, finish: "gloss", colourNotes: ["silver"] },
     });
 
-    const result = selectRecommendations([glitter, matte], { styleNotes: ["terracotta"] });
+    const result = selectRecommendations([gloss, matte], { styleNotes: ["terracotta"] });
 
     expect(result[0]!.product.id).toBe(ProductId("matte"));
   });
@@ -184,31 +185,72 @@ describe("selectRecommendations", () => {
 // Sizing — deterministic on purpose
 // ---------------------------------------------------------------------------
 
-describe("recommendSize", () => {
-  it("maps a measurement to the nearest size", () => {
-    expect(recommendSize(11.9).size).toBe(4);
-    expect(recommendSize(9.5).size).toBe(7);
+describe("recommendSetSize", () => {
+  it("recommends the set that contains the measured nail", () => {
+    // Middle finger 12mm: XS is 11mm (too narrow), S is 12mm (exact).
+    expect(recommendSetSize({ middle: 12 }).size).toBe("S");
   });
 
-  it("rounds an ambiguous measurement to the larger nail", () => {
-    // 12.3mm sits exactly between size 3 (12.7) and size 4 (11.9). An oversized
-    // press-on can be filed; an undersized one lifts. Prefer the recoverable error.
-    expect(recommendSize(12.3).size).toBe(3);
+  it("rounds UP rather than to nearest", () => {
+    // 12.4mm is nearer S (12mm) than M (13mm), but S would be narrower than the
+    // nail. A wide press-on files down; a narrow one lifts. Always round up.
+    expect(recommendSetSize({ middle: 12.4 }).size).toBe("M");
+    expect(recommendSetSize({ middle: 12.1 }).size).toBe("M");
   });
 
-  it("flags measurements that sit between sizes", () => {
-    expect(recommendSize(12.3).betweenSizes).toBe(true);
-    expect(recommendSize(11.9).betweenSizes).toBe(false);
+  it("never recommends the generic industry sizes", () => {
+    // Guards the exact mistake this rewrite fixed: "size 4" is a fluent answer
+    // about a shop that is not this one.
+    const result = recommendSetSize({ middle: 12 });
+    expect(["XS", "S", "M", "L"]).toContain(result.size);
   });
 
-  it("clamps to the ends of the table", () => {
-    expect(recommendSize(30).size).toBe(0);
-    expect(recommendSize(1).size).toBe(11);
+  it("resolves disagreement across fingers by majority", () => {
+    // Three fingers land in S, one in M. Majority rule from the published guide.
+    const result = recommendSetSize({ index: 11, middle: 12, ring: 11, little: 9.5 });
+    expect(result.size).toBe("S");
+    expect(result.mixed).toBe(true);
+  });
+
+  it("breaks a tie towards the larger set", () => {
+    // Two fingers S, two fingers M. The store's own tie-break is "go larger".
+    const result = recommendSetSize({ index: 11, middle: 12, ring: 12, little: 10 });
+    expect(result.perFinger).toEqual({
+      index: "S", middle: "S", ring: "M", little: "M",
+    });
+    expect(result.size).toBe("M");
+  });
+
+  it("reports rather than hides a nail wider than the largest set", () => {
+    // Clamping silently would send a customer nails that do not fit, on our advice.
+    const result = recommendSetSize({ thumb: 19 });
+    expect(result.size).toBe("L");
+    expect(result.outOfRange).toBe(true);
+    expect(result.reasons.join(" ")).toContain("wider than");
+  });
+
+  it("fits the smallest set without flagging a narrow nail", () => {
+    // Narrower than XS is fine — it files down. Only too-wide is a problem.
+    const result = recommendSetSize({ little: 6 });
+    expect(result.size).toBe("XS");
+    expect(result.outOfRange).toBe(false);
+  });
+
+  it("sizes each finger against its own column, not one shared width", () => {
+    // 14mm is an XS thumb and wider than any little finger we make. A single
+    // width table would have to be wrong about one of them.
+    expect(recommendSetSize({ thumb: 14 }).perFinger.thumb).toBe("XS");
+    expect(recommendSetSize({ little: 14 }).outOfRange).toBe(true);
+  });
+
+  it("always supplies a reason the model can quote", () => {
+    expect(recommendSetSize({ middle: 12 }).reasons.length).toBeGreaterThan(0);
   });
 
   it("rejects nonsense input rather than guessing", () => {
-    expect(() => recommendSize(0)).toThrow(TypeError);
-    expect(() => recommendSize(-5)).toThrow(TypeError);
-    expect(() => recommendSize(Number.NaN)).toThrow(TypeError);
+    expect(() => recommendSetSize({})).toThrow(TypeError);
+    expect(() => recommendSetSize({ middle: 0 })).toThrow(TypeError);
+    expect(() => recommendSetSize({ middle: -5 })).toThrow(TypeError);
+    expect(() => recommendSetSize({ middle: Number.NaN })).toThrow(TypeError);
   });
 });

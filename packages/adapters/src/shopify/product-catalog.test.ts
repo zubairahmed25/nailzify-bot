@@ -20,6 +20,24 @@ function rawProduct(overrides: Record<string, unknown> = {}) {
     onlineStoreUrl: "https://nailzify.com/products/autumn-almond-short",
     featuredImage: { url: "https://cdn.shopify.com/img.jpg" },
     priceRange: { minVariantPrice: { amount: "18.00", currencyCode: "USD" } },
+    // Both live value shapes: custom.* are plain strings, shopify.* are
+    // taxonomy metaobject references whose label only exists once resolved.
+    metafields: [
+      { namespace: "custom", key: "nail_text", value: "Short Almond", references: null },
+      { namespace: "custom", key: "nail_type", value: "Chrome", references: null },
+      {
+        namespace: "shopify",
+        key: "color-pattern",
+        value: '["gid://shopify/Metaobject/100210"]',
+        references: { nodes: [{ field: { value: "Pink" } }] },
+      },
+      {
+        namespace: "shopify",
+        key: "finish",
+        value: '["gid://shopify/Metaobject/100455"]',
+        references: { nodes: [{ field: { value: "Matte" } }] },
+      },
+    ],
     variants: {
       nodes: [
         {
@@ -237,6 +255,7 @@ describe("the two planes joined", () => {
           occasions: ["everyday"],
           suitableFor: ["beginner"],
           colourNotes: [],
+          style: null,
         },
       },
       {
@@ -250,6 +269,7 @@ describe("the two planes joined", () => {
           occasions: ["everyday"],
           suitableFor: ["beginner"],
           colourNotes: [],
+          style: null,
         },
       },
     ];
@@ -266,10 +286,18 @@ describe("the two planes joined", () => {
 });
 
 describe("merchandising warnings", () => {
-  it("surfaces tag problems to the caller", async () => {
+  it("surfaces metafield problems to the caller", async () => {
     const warnings: string[] = [];
     const fetchImpl = fakeFetch({
-      data: { nodes: [rawProduct({ tags: ["shape:almnod"] })] },
+      data: {
+        nodes: [
+          rawProduct({
+            metafields: [
+              { namespace: "custom", key: "nail_text", value: "Almnod", references: null },
+            ],
+          }),
+        ],
+      },
     });
     const client = createStorefrontClient({
       shopDomain: "nailzify.myshopify.com",
@@ -285,6 +313,8 @@ describe("merchandising warnings", () => {
 
     await catalog.getByIds([ProductId("gid://shopify/Product/8123")]);
 
-    expect(warnings.some((w) => w.includes("almnod"))).toBe(true);
+    // Echoed VERBATIM, not lowercased — the warning is only actionable if the
+    // merchandiser can search the admin for the exact string it names.
+    expect(warnings.some((w) => w.includes("Almnod"))).toBe(true);
   });
 });

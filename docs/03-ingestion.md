@@ -334,7 +334,8 @@ Shopify products/update webhook      ──┴──► Step Functions: ProductS
                                               ├─ Fetch catalog (Shopify GraphQL, paginated)
                                               ├─ For each product, build the EMBED TEXT:
                                               │     title + description + productType
-                                              │     + tags + shape + length + finish
+                                              │     + metafields: shape, style,
+                                              │       colour, finish
                                               │     + occasion + skinToneNotes
                                               │     ⛔ NO price. NO inventory. NO variant SKUs.
                                               ├─ Embed  (Bedrock)

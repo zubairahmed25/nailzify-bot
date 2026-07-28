@@ -36,9 +36,38 @@ import type { Money, PriceBand } from "../shared/money.js";
 // Descriptive attributes — stable enough to embed
 // ---------------------------------------------------------------------------
 
-export type NailShape = "almond" | "coffin" | "square" | "stiletto" | "oval" | "squoval";
-export type NailLength = "short" | "medium" | "long" | "extra-long";
-export type NailFinish = "matte" | "glossy" | "glitter" | "chrome" | "textured";
+/**
+ * ⚠️ THESE ENUMS MATCH THE REAL CATALOGUE, not a plausible-sounding vocabulary.
+ *
+ * An earlier version was invented before anyone looked at the store. Probing the
+ * live metafields showed how far off it was:
+ *
+ *   shape   invented stiletto and squoval, which the store does not sell
+ *   finish  invented "glossy" (the store says "Gloss"), omitted "Metallic",
+ *           and listed "chrome" as a finish when it is actually a nail TYPE
+ *   length  had four members and there is no length metafield at all
+ *
+ * Every one of those mismatches would parse a real product to null and quietly
+ * remove it from filtered search. Enum members are a data question, not a design
+ * question — re-derive them with scripts/probe-metafields.ts when the catalogue
+ * changes.
+ */
+export type NailShape = "almond" | "square" | "coffin" | "oval";
+
+/**
+ * Length has NO metafield. It is only ever inferred from a shape value that
+ * smuggles it in ("Short Almond"), which is true for 2 of 40 products — so this
+ * is null almost always, and that is honest rather than a gap to paper over.
+ */
+export type NailLength = "short" | "medium" | "long";
+
+/** From `shopify.finish`. Set on 15/40 products. */
+export type NailFinish = "gloss" | "matte" | "metallic";
+
+/**
+ * Occasion is NOT stored on the store. It is inferred, so treat it as a weak
+ * signal rather than a fact — see attributes.ts.
+ */
 export type Occasion = "everyday" | "bridal" | "party" | "professional" | "holiday";
 
 /**
@@ -70,8 +99,20 @@ export interface ProductAttributes {
   readonly finish: NailFinish | null;
   readonly occasions: readonly Occasion[];
   readonly suitableFor: readonly ExperienceLevel[];
-  /** Free-text colour descriptors, e.g. ["warm nude", "terracotta"]. */
+  /** From `shopify.color-pattern`, e.g. ["Pink"], ["Floral"]. */
   readonly colourNotes: readonly string[];
+  /**
+   * Decorative style, from `custom.nail_type` — "Chrome", "French", "Cat-eye".
+   *
+   * DELIBERATELY FREE TEXT, not an enum. The real catalogue has 18 values with
+   * genuine inconsistency ("3D Cat-eye" and "Cat-eye 3D" are the same thing),
+   * so an enum would reject valid data on a spelling difference.
+   *
+   * It is also the dimension customers actually search by, and semantic search
+   * handles the variants for free. Strict enums earn their place where the
+   * vocabulary is small and clean (shape, finish); this one is neither.
+   */
+  readonly style: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,4 +232,71 @@ export function hydrate(
   }
 
   return { products, missing };
+}
+
+// ---------------------------------------------------------------------------
+// Vector metadata — one definition, used by both the writer and the readers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the metadata stored alongside a product vector.
+ *
+ * WHY THIS EXISTS IN CORE. `VectorRecord.metadata` is `Record<string, unknown>`,
+ * because a vector store genuinely accepts arbitrary keys. That means nothing
+ * makes the writer and the reader agree: ingestion could write `nailShape` while
+ * search reads `shape`, and the result is not a crash — it is every product
+ * silently losing an attribute, and a bot that quietly stops being able to find
+ * anything by shape. No test fails. Nobody notices until a customer does.
+ *
+ * Adding `style` to ProductAttributes is exactly that hazard: the reader was
+ * updated in two adapters, and the writer did not exist yet to be updated.
+ *
+ * So the mapping lives here, once, and both sides go through it.
+ *
+ * ⚠️ NOTE WHAT IS ABSENT: no price, no stock. Only the stable descriptive facts
+ * a vector is allowed to encode — the two-plane rule at the storage boundary.
+ * `priceBand` is a coarse bucket, not a price; see money.ts.
+ */
+export function productVectorMetadata(input: {
+  readonly productId: ProductId;
+  readonly priceBand: PriceBand;
+  readonly attributes: ProductAttributes;
+}): Record<string, unknown> {
+  const a = input.attributes;
+  return {
+    productId: input.productId,
+    priceBand: input.priceBand,
+    // Nulls are omitted rather than written as "". An absent key and an empty
+    // string read back identically here, and omitting keeps stores that charge
+    // for metadata size honest.
+    ...(a.shape ? { shape: a.shape } : {}),
+    ...(a.length ? { length: a.length } : {}),
+    ...(a.finish ? { finish: a.finish } : {}),
+    ...(a.style ? { style: a.style } : {}),
+    occasions: [...a.occasions],
+    suitableFor: [...a.suitableFor],
+    colourNotes: [...a.colourNotes],
+  };
+}
+
+/**
+ * Inverse of `productVectorMetadata`. The pair is the contract.
+ *
+ * `read` is supplied by the caller because each store hands back a slightly
+ * different value soup (Pinecone stringifies, the in-memory store does not).
+ * The KEY NAMES stay here, which is the part that has to match.
+ */
+export function productAttributesFromMetadata(read: {
+  str: (key: string) => string;
+  strArray: (key: string) => string[];
+}): ProductAttributes {
+  return {
+    shape: (read.str("shape") || null) as NailShape | null,
+    length: (read.str("length") || null) as NailLength | null,
+    finish: (read.str("finish") || null) as NailFinish | null,
+    style: read.str("style") || null,
+    occasions: read.strArray("occasions") as Occasion[],
+    suitableFor: read.strArray("suitableFor") as ExperienceLevel[],
+    colourNotes: read.strArray("colourNotes"),
+  };
 }
