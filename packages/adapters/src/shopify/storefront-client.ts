@@ -41,10 +41,22 @@ import { CatalogUnavailable } from "@nailzify/core";
  *   public   X-Shopify-Storefront-Access-Token   browsers/mobile, meters per BUYER IP
  *   private  Shopify-Storefront-Private-Token    server-side only, must stay secret
  *
- * ⚠️ USE PRIVATE HERE. Public tokens meter by customer IP, but every call we
- * make originates from a handful of Lambda IPs — so all customers would share
- * one rate-limit bucket and throttle almost immediately. Private is the intended
- * path for a server-side caller and matches storing it in Secrets Manager.
+ * ⚠️ WHERE EACH ONE COMES FROM — they are not both on the same page.
+ *
+ *   PUBLIC   Develop apps -> your app -> API credentials ->
+ *            "Storefront API access token". This is what a custom app gives you.
+ *
+ *   PRIVATE  NOT on that page. Obtained by adding the Headless channel to the
+ *            store, creating a delegate access token, or requesting
+ *            unauthenticated scopes on an existing token.
+ *
+ * PREFER PRIVATE IN PRODUCTION. Public tokens meter by CUSTOMER IP, but every
+ * call we make originates from a handful of Lambda IPs — so all shoppers would
+ * share one rate-limit bucket and throttle under modest load. Private meters per
+ * token and is the intended path for a server-side caller.
+ *
+ * Public is perfectly workable for development and low traffic. The adapter
+ * supports both so the migration is a config change, not a code change.
  */
 export type StorefrontTokenKind = "private" | "public";
 

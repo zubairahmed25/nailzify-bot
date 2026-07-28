@@ -134,10 +134,14 @@ if (working) {
   if (working.kind === "public") {
     console.log("    export SHOPIFY_TOKEN_KIND=public");
     console.log(
-      "\n  ⚠️ This is a PUBLIC token. It works, but it meters by CUSTOMER IP —\n" +
-        "     and every call from production originates from a few Lambda IPs, so\n" +
-        "     all shoppers would share one rate-limit bucket. Switch to a private\n" +
-        "     token before going live.",
+      "\n  ⚠️ This is a PUBLIC token — which is exactly what a custom app's API\n" +
+        "     credentials page issues, so this is the expected result for that setup.\n\n" +
+        "     Fine for development. Before production, move to a PRIVATE token:\n" +
+        "     public tokens meter by CUSTOMER IP, but every production call comes\n" +
+        "     from a handful of Lambda IPs, so all shoppers would share one\n" +
+        "     rate-limit bucket and throttle under modest load.\n\n" +
+        "     Private tokens are NOT on the custom-app page. Obtain one by adding\n" +
+        "     the Headless channel to the store, or via a delegate access token.",
     );
   }
   console.log("    npx vite-node scripts/verify-shopify.ts");
@@ -170,8 +174,10 @@ if (anyGraphQlScope) {
       "  mismatch and NOT an API-version problem. Remaining causes, in order:\n\n" +
       "  1. Storefront API integration was never configured for the app.\n" +
       "     A custom app has Admin API scopes and Storefront API scopes as\n" +
-      "     SEPARATE sections. Having installed the app is not enough — the\n" +
-      "     Storefront section must be configured explicitly.\n\n" +
+      "     SEPARATE sections. Installing the app is not enough — the Storefront\n" +
+      "     section must be configured explicitly.\n" +
+      "     Note that page issues a PUBLIC token. Private tokens come from the\n" +
+      "     Headless channel or a delegate token, so don't hunt for one there.\n\n" +
       "  2. The token predates the scope. Scopes are baked in at issue time, so\n" +
       "     you must reinstall and copy the NEW token.\n\n" +
       "  3. The token belongs to a different store than this shop domain.\n\n" +
