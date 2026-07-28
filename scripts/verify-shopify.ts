@@ -31,6 +31,9 @@ const accessToken = process.env["SHOPIFY_STOREFRONT_TOKEN"];
 // Public storefront domain for fallback URLs; defaults to the myshopify one.
 const storefrontDomain = process.env["SHOPIFY_STOREFRONT_DOMAIN"] ?? shopDomain ?? "";
 const apiVersion = process.env["SHOPIFY_API_VERSION"] ?? "2025-01";
+// Private is correct for server-side callers. Set SHOPIFY_TOKEN_KIND=public
+// only if you deliberately created a public Storefront token.
+const tokenKind = process.env["SHOPIFY_TOKEN_KIND"] === "public" ? "public" : "private";
 
 if (!shopDomain || !accessToken) {
   console.error(
@@ -51,8 +54,60 @@ if (!shopDomain || !accessToken) {
   process.exit(1);
 }
 
+// ---------------------------------------------------------------------------
+// Preflight: diagnose the common misconfigurations WITHOUT printing the token.
+//
+// A 401 from Shopify says nothing about why. These checks turn "it doesn't work"
+// into a specific next action.
+// ---------------------------------------------------------------------------
+
+const problems: string[] = [];
+
+if (accessToken.startsWith("shpat_")) {
+  problems.push(
+    'Token starts with "shpat_" — that is an ADMIN API access token.\n' +
+      "     You need the STOREFRONT API access token from the same page.\n" +
+      "     (This project deliberately never uses the Admin API — see\n" +
+      "      packages/adapters/src/shopify/storefront-client.ts)",
+  );
+} else if (accessToken.startsWith("shpss_") || accessToken.startsWith("shpca_")) {
+  problems.push(
+    "Token looks like an app secret / client credential, not a Storefront\n" +
+      "     access token. The API secret key is for verifying inbound App Proxy\n" +
+      "     HMAC, not for calling the Storefront API.",
+  );
+} else if (tokenKind === "public" && !/^[0-9a-f]{32}$/i.test(accessToken)) {
+  problems.push(
+    `SHOPIFY_TOKEN_KIND=public but the token is ${accessToken.length} chars, not the\n` +
+      "     32 hex digits a PUBLIC token usually is. If this is a private token,\n" +
+      "     unset SHOPIFY_TOKEN_KIND — private is the default and is correct for\n" +
+      "     server-side calls.",
+  );
+}
+
+if (!shopDomain.endsWith(".myshopify.com")) {
+  problems.push(
+    `SHOPIFY_SHOP_DOMAIN is "${shopDomain}". The API host must be the permanent\n` +
+      "     .myshopify.com domain, not a custom storefront domain. Set\n" +
+      "     SHOPIFY_STOREFRONT_DOMAIN separately if your public domain differs.",
+  );
+}
+
+if (problems.length > 0) {
+  console.error("PREFLIGHT FOUND LIKELY CAUSES:\n");
+  for (const problem of problems) console.error(`  ✗  ${problem}\n`);
+  console.error(
+    "Fix these and re-run. If the token looks right, the remaining causes are:\n" +
+      "  • the app is not installed on the store (Develop apps -> Install app)\n" +
+      "  • Storefront API scopes were never configured for the app\n" +
+      "    (Configuration -> Storefront API integration ->\n" +
+      "     tick unauthenticated_read_product_listings -> Save, then reinstall)\n",
+  );
+  process.exit(1);
+}
+
 const warnings: string[] = [];
-const client = createStorefrontClient({ shopDomain, accessToken, apiVersion });
+const client = createStorefrontClient({ shopDomain, accessToken, apiVersion, tokenKind });
 const catalog = createShopifyProductCatalog({
   client,
   storefrontDomain,
@@ -63,7 +118,7 @@ const line = (label: string, value: unknown) => console.log(`  ${label.padEnd(26
 
 // ---------------------------------------------------------------------------
 
-console.log(`SHOP  ${shopDomain}   API ${apiVersion}\n`);
+console.log(`SHOP  ${shopDomain}   API ${apiVersion}   token kind: ${tokenKind}\n`);
 
 console.log("1. AUTH + SCOPE");
 let page;
@@ -72,11 +127,36 @@ try {
   line("products returned", page.items.length);
   line("has more pages", page.cursor !== null);
 } catch (e) {
-  console.error(`  FAILED — ${(e as Error).message}`);
-  console.error(
-    "\n  401/403 usually means a wrong token type (Admin instead of Storefront)\n" +
-      "  or a missing unauthenticated_read_product_listings scope.",
-  );
+  const message = (e as Error).message;
+  console.error(`  FAILED — ${message}`);
+
+  if (message.includes("401")) {
+    console.error(
+      `\n  Sent as a ${tokenKind.toUpperCase()} token, header ` +
+        (tokenKind === "public"
+          ? "X-Shopify-Storefront-Access-Token.\n"
+          : "Shopify-Storefront-Private-Token.\n") +
+      "  ⚠️ The two kinds use DIFFERENT headers, and a mismatch returns a 401 that\n" +
+      "     looks identical to a bad token. If you created a PUBLIC token, re-run\n" +
+      "     with SHOPIFY_TOKEN_KIND=public.\n" +
+      "\n  Otherwise the cause is almost certainly one of:\n\n" +
+        "  1. Storefront API access was never enabled for the app.\n" +
+        "     Shopify admin -> Settings -> Apps and sales channels -> Develop apps\n" +
+        "       -> your app -> Configuration\n" +
+        "       -> Storefront API integration -> Configure\n" +
+        "       -> tick 'unauthenticated_read_product_listings' -> Save\n" +
+        "     Then go to API credentials and INSTALL (or reinstall) the app.\n" +
+        "     ⚠️ A token issued before the scope was added does not gain it —\n" +
+        "        you must reinstall and copy the NEW token.\n\n" +
+        "  2. The app is not installed on this store at all.\n\n" +
+        "  3. The token belongs to a different store than SHOPIFY_SHOP_DOMAIN.\n",
+    );
+  } else if (message.includes("404")) {
+    console.error(
+      `\n  404 usually means the shop domain is wrong, or API version "${apiVersion}"\n` +
+        "  is no longer supported. Try SHOPIFY_API_VERSION=2025-04.\n",
+    );
+  }
   process.exit(1);
 }
 

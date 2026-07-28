@@ -31,10 +31,42 @@
 
 import { CatalogUnavailable } from "@nailzify/core";
 
+/**
+ * Which kind of Storefront token is configured.
+ *
+ * ⚠️ THEY USE DIFFERENT HEADERS. Sending a private token under the public
+ * header (or vice versa) returns 401 with no indication that the header is the
+ * problem — it reads exactly like a bad token or a missing scope.
+ *
+ *   public   X-Shopify-Storefront-Access-Token   browsers/mobile, meters per BUYER IP
+ *   private  Shopify-Storefront-Private-Token    server-side only, must stay secret
+ *
+ * ⚠️ USE PRIVATE HERE. Public tokens meter by customer IP, but every call we
+ * make originates from a handful of Lambda IPs — so all customers would share
+ * one rate-limit bucket and throttle almost immediately. Private is the intended
+ * path for a server-side caller and matches storing it in Secrets Manager.
+ */
+export type StorefrontTokenKind = "private" | "public";
+
 export interface StorefrontClientConfig {
   /** e.g. `nailzify.myshopify.com` — the permanent domain, not a custom one. */
   readonly shopDomain: string;
   readonly accessToken: string;
+  /** Defaults to `private` — the correct choice for server-side calls. */
+  readonly tokenKind?: StorefrontTokenKind;
+  /**
+   * Resolves the end customer's IP for the current request.
+   *
+   * Private tokens REQUIRE `Shopify-Storefront-Buyer-IP` when serving buyer
+   * traffic, so Shopify can apply bot protection and meter correctly. Without
+   * it, our Lambda looks like one very busy client rather than many shoppers.
+   *
+   * A callback rather than a value because the client is constructed ONCE per
+   * Lambda execution context and reused across requests — a static IP would be
+   * whichever customer happened to arrive first. Wire it to per-request state
+   * (AsyncLocalStorage) in the composition root.
+   */
+  readonly buyerIp?: () => string | undefined;
   /**
    * Pinned API version, e.g. `2025-01`.
    *
@@ -85,14 +117,23 @@ export function createStorefrontClient(config: StorefrontClientConfig): Storefro
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(config.tokenKind === "public"
+          ? { "X-Shopify-Storefront-Access-Token": config.accessToken }
+          : { "Shopify-Storefront-Private-Token": config.accessToken }),
+      };
+
+      // Only meaningful with a private token, and only when we actually know the
+      // buyer. Sending a wrong or absent IP is worse than omitting the header.
+      const ip = config.buyerIp?.();
+      if (ip && config.tokenKind !== "public") headers["Shopify-Storefront-Buyer-IP"] = ip;
+
       let response: Response;
       try {
         response = await doFetch(endpoint, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Storefront-Access-Token": config.accessToken,
-          },
+          headers,
           body: JSON.stringify({ query, variables: variables ?? {} }),
           signal: controller.signal,
         });

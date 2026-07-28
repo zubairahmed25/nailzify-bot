@@ -9,7 +9,8 @@
   "workspaces": [
     "packages/*",
     "services/*",
-    "web/*"
+    "web/*",
+    "infra"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
