@@ -30,36 +30,35 @@ import {
   FALLBACK_MODELS,
   type ModelRoleMap,
 } from "@nailzify/adapters";
-import { MessageId, type LlmUsage, type Message, type ToolDefinition } from "@nailzify/core";
+import {
+  MessageId,
+  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_VERSION,
+  TOOLS,
+  type LlmUsage,
+  type Message,
+} from "@nailzify/core";
 
 const REGION = "us-east-1";
 
-const TOOLS: ToolDefinition[] = [
-  {
-    name: "search_products",
-    description:
-      "Find press-on nail products matching customer preferences. Returns live product " +
-      "data including current price and stock. Call this for any product recommendation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Natural-language search query" },
-        shape: { type: "string", enum: ["almond", "coffin", "square", "stiletto", "oval"] },
-      },
-      required: ["query"],
-    },
-  },
-];
+// The REAL tool definitions, not a stand-in. Testing against a synthetic copy
+// would verify the transport and tell you nothing about the artifacts that
+// actually ship.
 
-// Over the ~1024-token minimum cacheable prefix for Sonnet-tier models. Below
-// the minimum nothing caches and nothing errors — which is the trap.
-const SYSTEM =
-  "You are the Nailzify concierge, assisting customers of a press-on nail store. " +
-  Array.from(
-    { length: 260 },
-    (_, i) =>
-      `Rule ${i}: ground every product claim in a tool result; never state a price you were not given.`,
-  ).join(" ");
+/**
+ * ⚠️ THE REAL SYSTEM PROMPT, deliberately.
+ *
+ * An earlier version of this script used synthetic filler to clear the cache
+ * minimum. That proved the transport worked and proved nothing about the
+ * artifacts that ship — including whether the real prompt is even long enough
+ * to cache, and whether its tone rules are actually obeyed.
+ *
+ * The real prompt measures ~1001 tokens, just UNDER the ~1024-token Sonnet-tier
+ * minimum. Tools render before system, so the combined prefix should clear it —
+ * but "should" is exactly the kind of assumption that has been wrong repeatedly
+ * on this project, so the cache check below is now load-bearing.
+ */
+const SYSTEM = SYSTEM_PROMPT;
 
 const user = (text: string): Message => ({
   id: MessageId(`u-${Math.random().toString(36).slice(2)}`),
@@ -103,7 +102,8 @@ if (reachable.length === 0) {
 // Prefer whichever tier is available; fall back to the first reachable id.
 const chat = reachable.find((m) => m.includes("sonnet")) ?? reachable[0]!;
 const models: ModelRoleMap = { chat, fast: reachable.find((m) => m.includes("haiku")) ?? chat, judge: chat };
-console.log(`\n  using chat model: ${chat}\n`);
+console.log(`\n  using chat model: ${chat}`);
+console.log(`  prompt version:   ${SYSTEM_PROMPT_VERSION}\n`);
 
 const usageLog: (LlmUsage & { model: string })[] = [];
 const llm = createBedrockLlmClient({ region: REGION, models, onUsage: (u) => usageLog.push(u) });
@@ -129,7 +129,11 @@ line("input_tokens", first.usage.inputTokens);
 line("cache_read", first.usage.cacheReadInputTokens);
 
 if (first.stopReason !== "tool_use") {
-  console.log("  ⚠️  Expected a tool call. Check the tool descriptions in prompts/tools.ts.");
+  // ⚠️ A prompt-quality failure, not a transport one. Print what the model said
+  // instead — that is the only way to tell "asked a clarifying question" from
+  // "answered from memory", and they need opposite fixes.
+  console.log("  ⚠️  NO TOOL CALL. The prompt says a product request must call search_products.");
+  console.log(`  model said        ${JSON.stringify(first.text.slice(0, 400))}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +167,16 @@ if (!cacheWorks) {
 
 console.log("\n4. STREAMING + TOOL RESULT ROUND TRIP");
 const toolCall = first.toolCalls[0];
+
+if (!toolCall) {
+  console.log(
+    "\n  SKIPPED — no tool call to respond to. Sending a fabricated tool_use_id\n" +
+      "  would produce a 400 that buries the real finding above.\n",
+  );
+  console.log("VERDICT: transport verified (tool schema, caching). PROMPT NEEDS WORK.");
+  process.exit(1);
+}
+
 const conversation: Message[] = [
   user("I need something almond-shaped for a wedding"),
   {
@@ -179,7 +193,7 @@ const conversation: Message[] = [
     createdAt: Date.now(),
     toolResults: [
       {
-        toolCallId: toolCall?.id ?? "toolu_missing",
+        toolCallId: toolCall.id,
         // Deliberately ONE product at a specific price. If the model states any
         // other figure, grounding is broken.
         content: JSON.stringify([
@@ -223,7 +237,19 @@ console.log(`\n  answer: ${streamed.trim().slice(0, 220)}`);
 // Grounding spot-check
 // ---------------------------------------------------------------------------
 
-console.log("\n5. GROUNDING SPOT-CHECK");
+console.log("\n5. PROMPT COMPLIANCE");
+// The system prompt makes explicit, checkable promises. A prompt nobody verifies
+// is a prompt that quietly stops being followed.
+const emoji = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(streamed);
+const headings = /^#{1,6}\s/m.test(streamed);
+const bullets = (streamed.match(/^\s*[-*]\s/gm) ?? []).length;
+const preamble = /^(great|perfect|excellent|wonderful|good) (news|question|choice)/i.test(streamed.trim());
+line('no emoji ("never use emoji")', emoji ? "FAIL — emoji present" : "ok");
+line("no markdown headings", headings ? "FAIL — headings present" : "ok");
+line("bullet lines", bullets > 0 ? `${bullets} (prompt says avoid unless enumerating)` : "0");
+line("no filler preamble", preamble ? "FAIL — opens with filler" : "ok");
+
+console.log("\n6. GROUNDING SPOT-CHECK");
 const quotedRightPrice = streamed.includes("24");
 const inventedPrice = /\$\s?(?!24)\d{1,3}(\.\d{2})?/.test(streamed);
 line("quotes the given price", quotedRightPrice ? "yes" : "no");
