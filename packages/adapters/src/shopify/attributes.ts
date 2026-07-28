@@ -19,12 +19,15 @@
  * editing a product, with no developer involved. That editability is worth more
  * than validation at this scale.
  *
- * THE COST OF THAT CHOICE, AND HOW WE PAY IT. A typo (`shape:almnod`) silently
- * produces a default value, and the product quietly stops matching shape
- * queries. Nothing errors. So `parseAttributes` returns WARNINGS alongside the
- * attributes — every unparsed tag and every missing dimension. The nightly sync
- * logs them, which turns an invisible merchandising bug into a report you can
- * act on (docs/10-operations.md §10.3).
+ * THE COST OF THAT CHOICE, AND HOW WE PAY IT. A typo (`shape:almnod`) leaves the
+ * attribute unknown and the product quietly stops matching shape queries.
+ * Nothing errors. So `parseAttributes` returns WARNINGS alongside the attributes
+ * — every unparsed tag and every missing dimension. The nightly sync logs them,
+ * turning an invisible merchandising bug into a report you can act on
+ * (docs/10-operations.md §10.3).
+ *
+ * A live check of the real catalogue returned `fully tagged 0/40`, which is
+ * exactly the situation these warnings exist to surface.
  *
  * Migrate to metafields when the catalogue outgrows one person's attention.
  */
@@ -45,18 +48,16 @@ const OCCASIONS = ["everyday", "bridal", "party", "professional", "holiday"] as 
 const LEVELS = ["beginner", "comfortable", "experienced"] as const;
 
 /**
- * Defaults for a product with no relevant tag.
+ * ⚠️ THERE ARE NO DEFAULTS, DELIBERATELY.
  *
- * Chosen to be the least-surprising middle rather than the most common value —
- * a mis-tagged product should be mediocre in ranking, not confidently wrong.
- * `selectRecommendations` scores only against stated preferences, so a default
- * costs the product relevance without excluding it.
+ * An earlier version defaulted an untagged product to almond/medium/glossy. A
+ * live check of the real catalogue found 0 of 40 products tagged — so every one
+ * carried three fabricated attributes into the model's context, which it would
+ * then state to a customer as fact.
+ *
+ * Unknown is `null`. A missing tag costs the product relevance in ranking, which
+ * is the correct penalty; it must never buy the product a false claim.
  */
-const DEFAULTS = {
-  shape: "almond",
-  length: "medium",
-  finish: "glossy",
-} as const satisfies Pick<ProductAttributes, "shape" | "length" | "finish">;
 
 export interface ParsedAttributes {
   readonly attributes: ProductAttributes;
@@ -108,15 +109,11 @@ export function parseAttributes(
     else pairs.set(canonical, [value]);
   }
 
-  const single = <T extends string>(
-    key: string,
-    allowed: readonly T[],
-    fallback: T,
-  ): T => {
+  const single = <T extends string>(key: string, allowed: readonly T[]): T | null => {
     const values = pairs.get(key);
     if (!values || values.length === 0) {
-      warnings.push(`"${productTitle}": missing ${key} tag, defaulting to "${fallback}"`);
-      return fallback;
+      warnings.push(`"${productTitle}": no ${key} tag — attribute left unknown`);
+      return null;
     }
     if (values.length > 1) {
       warnings.push(`"${productTitle}": multiple ${key} tags (${values.join(", ")}), using first`);
@@ -124,9 +121,9 @@ export function parseAttributes(
     const value = values[0]!;
     if (!allowed.includes(value as T)) {
       warnings.push(
-        `"${productTitle}": unknown ${key} "${value}" — expected one of ${allowed.join(", ")}`,
+        `"${productTitle}": unrecognised ${key} "${value}" — expected one of ${allowed.join(", ")}`,
       );
-      return fallback;
+      return null;
     }
     return value as T;
   };
@@ -158,9 +155,9 @@ export function parseAttributes(
 
   return {
     attributes: {
-      shape: single<NailShape>("shape", SHAPES, DEFAULTS.shape),
-      length: single<NailLength>("length", LENGTHS, DEFAULTS.length),
-      finish: single<NailFinish>("finish", FINISHES, DEFAULTS.finish),
+      shape: single<NailShape>("shape", SHAPES),
+      length: single<NailLength>("length", LENGTHS),
+      finish: single<NailFinish>("finish", FINISHES),
       occasions,
       suitableFor,
       colourNotes: (pairs.get("colour") ?? []).map((c) => c.replace(/-/g, " ")),
@@ -191,9 +188,11 @@ export function productEmbeddingText(input: {
     input.title,
     input.productType,
     input.description,
-    `Shape: ${a.shape}`,
-    `Length: ${a.length}`,
-    `Finish: ${a.finish}`,
+    // Only assert what we actually know — an unknown attribute is omitted, not
+    // guessed, so the vector never encodes a fabricated property either.
+    a.shape ? `Shape: ${a.shape}` : "",
+    a.length ? `Length: ${a.length}` : "",
+    a.finish ? `Finish: ${a.finish}` : "",
     `Occasions: ${a.occasions.join(", ")}`,
     `Suitable for: ${a.suitableFor.join(", ")}`,
     a.colourNotes.length > 0 ? `Colours: ${a.colourNotes.join(", ")}` : "",

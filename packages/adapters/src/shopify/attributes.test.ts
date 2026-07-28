@@ -49,20 +49,33 @@ describe("parsing namespaced tags", () => {
 });
 
 describe("warnings make silent merchandising bugs visible", () => {
-  it("warns on a typo rather than failing", () => {
-    // THE FAILURE MODE THIS EXISTS FOR. "shape:almnod" would otherwise default
-    // silently and the product would quietly stop matching shape queries.
+  it("leaves a typo'd attribute UNKNOWN rather than guessing", () => {
+    // THE BUG A LIVE CATALOGUE CHECK CAUGHT. This used to fall back to "almond",
+    // so the model was handed a fabricated fact and would state it to a customer
+    // as truth. Parse still succeeds — but it must not invent.
     const { attributes, warnings } = parse(["shape:almnod", "length:short", "finish:matte"]);
 
-    expect(attributes.shape).toBe("almond"); // safe default, parse still succeeds
+    expect(attributes.shape).toBeNull();
     expect(warnings.some((w) => w.includes("almnod"))).toBe(true);
   });
 
-  it("warns on a missing dimension", () => {
-    const { warnings } = parse(["shape:almond"]);
+  it("warns on a missing dimension and leaves it null", () => {
+    const { attributes, warnings } = parse(["shape:almond"]);
 
-    expect(warnings.some((w) => w.includes("missing length"))).toBe(true);
-    expect(warnings.some((w) => w.includes("missing finish"))).toBe(true);
+    expect(attributes.length).toBeNull();
+    expect(attributes.finish).toBeNull();
+    expect(warnings.some((w) => w.includes("no length tag"))).toBe(true);
+    expect(warnings.some((w) => w.includes("no finish tag"))).toBe(true);
+  });
+
+  it("invents nothing for a completely untagged product", () => {
+    // The live catalogue reported `fully tagged 0/40`, so this is the common
+    // case, not an edge case.
+    const { attributes } = parse(["bestseller", "new-in"]);
+
+    expect(attributes.shape).toBeNull();
+    expect(attributes.length).toBeNull();
+    expect(attributes.finish).toBeNull();
   });
 
   it("warns on conflicting tags and uses the first", () => {
@@ -90,8 +103,11 @@ describe("warnings make silent merchandising bugs visible", () => {
   });
 });
 
-describe("defaults are chosen to be un-misleading", () => {
+describe("the few remaining defaults are chosen to be un-misleading", () => {
   it("defaults occasion to everyday", () => {
+    // Unlike shape/length/finish, "everyday" makes no specific claim a customer
+    // could be misled by — it only affects which queries the product surfaces
+    // for. Still a default, but an honest one.
     expect(parse([]).attributes.occasions).toEqual(["everyday"]);
   });
 

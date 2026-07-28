@@ -48,10 +48,26 @@ export type Occasion = "everyday" | "bridal" | "party" | "professional" | "holid
  */
 export type ExperienceLevel = "beginner" | "comfortable" | "experienced";
 
+/**
+ * Descriptive attributes.
+ *
+ * ⚠️ shape/length/finish are NULLABLE, and that is load-bearing.
+ *
+ * An earlier version defaulted an untagged product to almond/medium/glossy. A
+ * live catalogue check found 0 of 40 products tagged — so every one was being
+ * described to the model with three fabricated facts, which it would then state
+ * to a customer as truth. That is precisely the hallucination this architecture
+ * exists to prevent, introduced by our own adapter rather than by a stale vector
+ * or by the model.
+ *
+ * The catalogue also contains items like "Nail Remover", where nail shape is not
+ * merely unknown but inapplicable. `null` says "we do not know"; a default says
+ * "it is almond". Only one of those is honest.
+ */
 export interface ProductAttributes {
-  readonly shape: NailShape;
-  readonly length: NailLength;
-  readonly finish: NailFinish;
+  readonly shape: NailShape | null;
+  readonly length: NailLength | null;
+  readonly finish: NailFinish | null;
   readonly occasions: readonly Occasion[];
   readonly suitableFor: readonly ExperienceLevel[];
   /** Free-text colour descriptors, e.g. ["warm nude", "terracotta"]. */

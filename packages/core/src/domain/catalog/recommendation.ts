@@ -145,9 +145,14 @@ function score(product: Product, prefs: CustomerPreferences): Recommendation {
   let earned = 0;
   let possible = 0;
 
+  // An unknown attribute contributes to `possible` but earns nothing: we cannot
+  // confirm a match, so the product ranks below a confirmed one without being
+  // excluded outright.
   if (prefs.shape !== undefined) {
     possible += WEIGHT.shape;
-    if (attrs.shape === prefs.shape) {
+    if (attrs.shape === null) {
+      // no credit, and crucially no claim
+    } else if (attrs.shape === prefs.shape) {
       earned += WEIGHT.shape;
       reasons.push(`${attrs.shape} shape, as you asked`);
     } else if (ADJACENT_SHAPES[prefs.shape].includes(attrs.shape)) {
@@ -156,7 +161,7 @@ function score(product: Product, prefs: CustomerPreferences): Recommendation {
     }
   }
 
-  if (prefs.length !== undefined) {
+  if (prefs.length !== undefined && attrs.length !== null) {
     possible += WEIGHT.length;
     const distance = lengthDistance(attrs.length, prefs.length);
     if (distance === 0) {
@@ -192,7 +197,11 @@ function score(product: Product, prefs: CustomerPreferences): Recommendation {
     const hits = prefs.styleNotes.filter((note) => haystack.includes(note.toLowerCase()));
     if (hits.length > 0) {
       earned += WEIGHT.style * (hits.length / prefs.styleNotes.length);
-      reasons.push(`${attrs.finish} finish in ${attrs.colourNotes.join(", ")}`);
+      reasons.push(
+        attrs.finish
+          ? `${attrs.finish} finish in ${attrs.colourNotes.join(", ")}`
+          : `${attrs.colourNotes.join(", ")}`,
+      );
     }
   }
 

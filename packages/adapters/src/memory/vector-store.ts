@@ -194,9 +194,9 @@ function toProductCandidate(record: VectorRecord, score: number): ProductCandida
   const m = record.metadata;
 
   const attributes: ProductAttributes = {
-    shape: str(m, "shape", "almond") as NailShape,
-    length: str(m, "length", "short") as NailLength,
-    finish: str(m, "finish", "glossy") as ProductAttributes["finish"],
+    shape: (str(m, "shape") || null) as NailShape | null,
+    length: (str(m, "length") || null) as NailLength | null,
+    finish: (str(m, "finish") || null) as ProductAttributes["finish"],
     occasions: strArray(m, "occasions") as Occasion[],
     suitableFor: strArray(m, "suitableFor") as ProductAttributes["suitableFor"],
     colourNotes: strArray(m, "colourNotes"),

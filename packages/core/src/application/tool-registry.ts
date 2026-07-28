@@ -203,7 +203,10 @@ async function runProductSearch(
       `    <price>${formatMoney(p.price)}</price>`,
       `    <availability>${p.available ? "in_stock" : "out_of_stock"}</availability>`,
       `    <url>${escapeText(p.url)}</url>`,
-      `    <attributes>shape: ${p.attributes.shape} | length: ${p.attributes.length} | finish: ${p.attributes.finish}</attributes>`,
+      // ⚠️ Only emit attributes we actually KNOW. An unknown one is omitted, not
+      // rendered as "null" and not guessed — anything that appears here, the
+      // model will state to a customer as fact.
+      ...(describeAttributes(p.attributes) ? [describeAttributes(p.attributes)] : []),
       `    <why_it_fits>${escapeText(rec.reasons.join("; "))}</why_it_fits>`,
       `  </product>`,
     ].join("\n");
@@ -249,6 +252,27 @@ async function runProductDetails(
     `  </product>`,
     `</live_products>`,
   ].join("\n");
+}
+
+/**
+ * Render only the attributes we actually know.
+ *
+ * Returns an empty string when nothing is known, so the block is omitted rather
+ * than emitted empty. A product with no merchandising tags is described purely
+ * by its title, description and live price — all of which are true.
+ */
+function describeAttributes(attrs: {
+  readonly shape: string | null;
+  readonly length: string | null;
+  readonly finish: string | null;
+}): string {
+  const known = [
+    attrs.shape ? `shape: ${attrs.shape}` : "",
+    attrs.length ? `length: ${attrs.length}` : "",
+    attrs.finish ? `finish: ${attrs.finish}` : "",
+  ].filter(Boolean);
+
+  return known.length > 0 ? `    <attributes>${known.join(" | ")}</attributes>` : "";
 }
 
 // ---------------------------------------------------------------------------
