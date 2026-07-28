@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseMetafields, productEmbeddingText, type RawMetafields } from "./attributes.js";
+import { productEmbeddingText } from "@nailzify/core";
+import { parseMetafields, type RawMetafields } from "./attributes.js";
 
 const parse = (raw: Partial<RawMetafields>) =>
   parseMetafields(

@@ -342,7 +342,28 @@ export function structuralContextHeader(
   draft: Pick<ChunkDraft, "section" | "chunkIndex">,
 ): string {
   const parts = [documentTitle];
-  if (draft.section) parts.push(draft.section);
+  const section = withoutRedundantRoot(draft.section, documentTitle);
+  if (section) parts.push(section);
   const label = parts.join(" — ");
   return draft.chunkIndex > 0 ? `[${label} (continued)]` : `[${label}]`;
+}
+
+/**
+ * Drop a leading heading segment that merely repeats the document title.
+ *
+ * Almost every document opens with an H1 that IS its title, and the heading path
+ * faithfully records it. Combined with the title prefix that produced:
+ *
+ *     [Return Policy — Return Policy > Money-Back Guarantee]
+ *
+ * Caught by eyeballing a dry run, not by a test — every existing test used a
+ * title that differed from its H1, so the duplication never appeared. It is
+ * prepended to EVERY chunk before embedding, so the waste is corpus-wide, and a
+ * repeated phrase pulls the vector very slightly toward itself.
+ */
+function withoutRedundantRoot(section: string, documentTitle: string): string {
+  if (!section) return "";
+  const [root, ...rest] = section.split(" > ");
+  if (root?.trim().toLowerCase() !== documentTitle.trim().toLowerCase()) return section;
+  return rest.join(" > ");
 }

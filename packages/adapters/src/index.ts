@@ -33,8 +33,6 @@ export {
 } from "./shopify/product-catalog.js";
 export {
   parseMetafields,
-  productEmbeddingText,
-  isPattern,
   type ParsedAttributes,
   type RawMetafields,
 } from "./shopify/attributes.js";

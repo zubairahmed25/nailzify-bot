@@ -250,3 +250,41 @@ A tracking number is emailed once your order ships.
     }
   });
 });
+
+describe("structuralContextHeader", () => {
+  it("does not repeat the document title when the H1 already is the title", () => {
+    // Caught by eyeballing a dry run: every chunk was headed
+    // "[Return Policy — Return Policy > Money-Back Guarantee]". The header is
+    // prepended to every chunk before embedding, so the waste is corpus-wide.
+    const header = structuralContextHeader("Return Policy", {
+      section: "Return Policy > Money-Back Guarantee",
+      chunkIndex: 0,
+    });
+
+    expect(header).toBe("[Return Policy — Money-Back Guarantee]");
+  });
+
+  it("keeps a section path that does not start with the title", () => {
+    expect(
+      structuralContextHeader("Size Guide", { section: "How To Measure", chunkIndex: 0 }),
+    ).toBe("[Size Guide — How To Measure]");
+  });
+
+  it("collapses to the title alone when the H1 is the only heading", () => {
+    expect(
+      structuralContextHeader("Return Policy", { section: "Return Policy", chunkIndex: 0 }),
+    ).toBe("[Return Policy]");
+  });
+
+  it("matches case-insensitively", () => {
+    expect(
+      structuralContextHeader("Return Policy", { section: "RETURN POLICY > Refunds", chunkIndex: 0 }),
+    ).toBe("[Return Policy — Refunds]");
+  });
+
+  it("still marks continuation chunks", () => {
+    expect(
+      structuralContextHeader("Return Policy", { section: "Return Policy > Refunds", chunkIndex: 1 }),
+    ).toBe("[Return Policy — Refunds (continued)]");
+  });
+});

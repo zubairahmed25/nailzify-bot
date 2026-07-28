@@ -27,6 +27,7 @@ export * from "./domain/knowledge/retrieval-policy.js";
 // ---- catalog plane ----
 export * from "./domain/catalog/product.js";
 export * from "./domain/catalog/recommendation.js";
+export * from "./domain/catalog/embedding-text.js";
 
 // ---- prompts ----
 export * from "./prompts/system-prompt.js";
@@ -36,6 +37,8 @@ export * from "./prompts/tools.js";
 export * from "./application/retrieval.js";
 export * from "./application/tool-registry.js";
 export * from "./application/handle-message.js";
+export * from "./application/ingest-knowledge.js";
+export * from "./application/ingest-products.js";
 
 // ---- ports ----
 export * from "./ports/index.js";

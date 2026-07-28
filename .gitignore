@@ -30,3 +30,4 @@ scratch/
 # Local test corpora (real customer docs should not live in git)
 data/raw/
 data/processed/
+.ingest-state.json
