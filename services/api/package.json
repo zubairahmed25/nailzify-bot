@@ -1,0 +1,12 @@
+{
+  "name": "@nailzify/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Chat Lambda. Streaming Function URL, App Proxy HMAC verification, SSE.",
+  "main": "./src/handler.ts",
+  "dependencies": {
+    "@nailzify/adapters": "*",
+    "@nailzify/core": "*"
+  }
+}
