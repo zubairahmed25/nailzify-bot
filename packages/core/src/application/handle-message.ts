@@ -84,9 +84,16 @@ export function createHandleMessage(deps: HandleMessageDeps) {
     const now = deps.clock.now();
 
     // ---- 1. Load or create the session --------------------------------------
-    let session =
-      (await deps.conversations.loadSession(command.sessionId)) ??
-      createSession(command.sessionId, command.customerId, now);
+    const loaded = await deps.conversations.loadSession(command.sessionId);
+    let session = loaded ?? createSession(command.sessionId, command.customerId, now);
+
+    // Capture the version AS LOADED. Every domain mutation bumps it, and a turn
+    // may apply more than one (recordTurn, then escalate), so deriving the
+    // expected version later from the final value is wrong — it would be off by
+    // however many mutations happened and the conditional write would always
+    // fail. This is the only correct reference point.
+    const isNew = loaded === null;
+    const loadedVersion = loaded?.version ?? 0;
 
     // ---- 2. Enforce budgets BEFORE spending anything -------------------------
     // Cheapest checks first. Every token spent on a request we were going to
@@ -190,7 +197,7 @@ export function createHandleMessage(deps: HandleMessageDeps) {
       promptVersion: SYSTEM_PROMPT_VERSION,
     });
 
-    await persist(deps, session, [incoming, assistantTurn], finishedAt);
+    await persist(deps, session, [incoming, assistantTurn], isNew, loadedVersion);
 
     yield {
       type: "done",
@@ -208,11 +215,12 @@ async function persist(
   deps: HandleMessageDeps,
   session: Session,
   messages: readonly Message[],
-  now: number,
+  isNew: boolean,
+  loadedVersion: number,
 ): Promise<Result<void, Error>> {
   try {
-    if (session.version <= 1) await deps.conversations.createSession(session);
-    else await deps.conversations.saveSession(session, session.version - 1);
+    if (isNew) await deps.conversations.createSession(session);
+    else await deps.conversations.saveSession(session, loadedVersion);
 
     await deps.conversations.appendMessages(session.id, messages, ttlFor(session));
     return ok(undefined);
@@ -220,7 +228,6 @@ async function persist(
     // A persistence failure must NOT fail a turn the customer has already read.
     // The answer was delivered; losing the transcript is a monitoring problem,
     // not a reason to show an error after the fact.
-    void now;
     return err(error as Error);
   }
 }

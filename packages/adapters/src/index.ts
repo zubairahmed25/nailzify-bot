@@ -36,3 +36,8 @@ export {
   productEmbeddingText,
   type ParsedAttributes,
 } from "./shopify/attributes.js";
+export {
+  createDynamoConversationRepo,
+  ConcurrentSessionUpdate,
+  type DynamoConversationRepoConfig,
+} from "./dynamodb/conversation-repo.js";
