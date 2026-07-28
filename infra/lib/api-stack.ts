@@ -12,7 +12,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as logs from "aws-cdk-lib/aws-logs";
-import type * as s3 from "aws-cdk-lib/aws-s3";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import type * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import type { Construct } from "constructs";
@@ -25,7 +25,6 @@ const repoRoot = path.resolve(here, "../..");
 export interface ApiStackProps extends cdk.StackProps {
   readonly envName: string;
   readonly table: dynamodb.Table;
-  readonly widgetBucket: s3.Bucket;
   readonly proxySecret: secretsmanager.Secret;
   readonly storefrontSecret: secretsmanager.Secret;
   readonly pineconeSecret: secretsmanager.Secret;
@@ -43,10 +42,29 @@ export interface ApiStackProps extends cdk.StackProps {
 
 export class ApiStack extends cdk.Stack {
   readonly distributionDomainName: string;
+  readonly widgetBucket: s3.Bucket;
 
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
     const { envName } = props;
+    const isProd = envName === "prod";
+
+    // ---- Widget assets ----------------------------------------------------
+    // Lives here rather than in the data stack because Origin Access Control
+    // attaches a bucket policy referencing the distribution below. Owning both
+    // sides in one stack avoids a cross-stack dependency cycle — and is more
+    // honest anyway, since a build artifact is not state.
+    this.widgetBucket = new s3.Bucket(this, "WidgetBucket", {
+      bucketName: `nailzify-${envName}-widget-${this.account}`,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      // Served through CloudFront with OAC. Public-access misconfiguration is
+      // the most common cloud data leak; the bucket itself is never reachable.
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      // Rebuildable from source, so destroying it outside prod is harmless.
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: !isProd,
+    });
 
     // ---- Lambda -----------------------------------------------------------
     const chatFn = new nodejs.NodejsFunction(this, "ChatHandler", {
@@ -103,7 +121,14 @@ export class ApiStack extends cdk.Stack {
       tracing: lambda.Tracing.ACTIVE,
       // ⚠️ CloudWatch's default is NEVER EXPIRE. At $0.03/GB stored forever this
       // is the classic quiet AWS cost leak. Set it on every function.
-      logRetention: logs.RetentionDays.ONE_MONTH,
+      //
+      // An explicit LogGroup rather than the deprecated `logRetention` prop —
+      // that one provisions a custom resource Lambda just to call PutRetentionPolicy.
+      logGroup: new logs.LogGroup(this, "ChatHandlerLogs", {
+        logGroupName: `/aws/lambda/nailzify-${envName}-chat`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
     });
 
     // ---- IAM: least privilege --------------------------------------------
@@ -194,7 +219,7 @@ export class ApiStack extends cdk.Stack {
 
       // Widget assets. Content-hashed filenames mean these can cache hard.
       defaultBehavior: {
-        origin: origins.S3BucketOrigin.withOriginAccessControl(props.widgetBucket),
+        origin: origins.S3BucketOrigin.withOriginAccessControl(this.widgetBucket),
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       },
@@ -221,5 +246,6 @@ export class ApiStack extends cdk.Stack {
       description: "Point the Shopify App Proxy at https://<this>/api",
     });
     new cdk.CfnOutput(this, "FunctionName", { value: chatFn.functionName });
+    new cdk.CfnOutput(this, "WidgetBucketName", { value: this.widgetBucket.bucketName });
   }
 }

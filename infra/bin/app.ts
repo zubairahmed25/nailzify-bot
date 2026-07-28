@@ -55,16 +55,16 @@ const api = new ApiStack(app, `Nailzify-${envName}-Api`, {
   env,
   envName,
   table: data.table,
-  widgetBucket: data.widgetBucket,
   proxySecret: data.shopifyProxySecret,
   storefrontSecret: data.shopifyStorefrontSecret,
   pineconeSecret: data.pineconeSecret,
   ...config,
 });
 
-// The API stack reads resources the Data stack owns. Declaring the dependency
-// makes deploy order explicit rather than inferred.
-api.addDependency(data);
+// No explicit dependency call. The API stack references the Data stack's table
+// and secrets, and CDK derives the ordering from those references. Declaring it
+// by hand was what turned an ordinary reference into a reported CYCLE once
+// Origin Access Control added a policy pointing the other way.
 
 cdk.Tags.of(app).add("Project", "nailzify-concierge");
 cdk.Tags.of(app).add("Environment", envName);
@@ -117,6 +117,14 @@ NagSuppressions.addStackSuppressions(api, [
   {
     id: "AwsSolutions-L1",
     reason: "Node 22 is the current LTS runtime for Lambda at time of writing.",
+  },
+  {
+    id: "AwsSolutions-S1",
+    reason:
+      "The widget bucket has no server access logging. It holds only public, " +
+      "content-hashed build artifacts and is never reachable directly — every " +
+      "read arrives through CloudFront, so CloudFront access logs (not S3 ones) " +
+      "are where request-level data would come from.",
   },
 ]);
 

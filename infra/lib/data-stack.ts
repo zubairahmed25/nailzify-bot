@@ -28,7 +28,6 @@ export interface DataStackProps extends cdk.StackProps {
 export class DataStack extends cdk.Stack {
   readonly table: dynamodb.Table;
   readonly documentsBucket: s3.Bucket;
-  readonly widgetBucket: s3.Bucket;
   readonly shopifyProxySecret: secretsmanager.Secret;
   readonly shopifyStorefrontSecret: secretsmanager.Secret;
   readonly pineconeSecret: secretsmanager.Secret;
@@ -36,7 +35,6 @@ export class DataStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
     const { envName } = props;
-    const isProd = envName === "prod";
 
     // ---- Conversations ----------------------------------------------------
     this.table = new dynamodb.Table(this, "AppTable", {
@@ -101,19 +99,14 @@ export class DataStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
-    // ---- Widget assets ----------------------------------------------------
-    this.widgetBucket = new s3.Bucket(this, "WidgetBucket", {
-      bucketName: `nailzify-${envName}-widget-${this.account}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      // Served through CloudFront with Origin Access Control. Public-access
-      // misconfiguration is the most common cloud data leak; the bucket itself
-      // is never reachable.
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-      // Rebuildable from source, so destroying it in dev is harmless.
-      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: !isProd,
-    });
+    // NOTE: the widget asset bucket deliberately lives in the API stack, not
+    // here. Origin Access Control attaches a bucket policy referencing the
+    // CloudFront distribution, so a bucket here would make Data depend on Api
+    // while Api already depends on Data — a genuine dependency cycle.
+    //
+    // Moving it is the correct fix rather than a workaround: this stack is for
+    // STATE, and the widget bundle is build output, rebuildable from source and
+    // redeployed on the same cadence as the API.
 
     // ---- Secrets ----------------------------------------------------------
     // Created EMPTY. Values are set once, out of band, by a human.
@@ -140,6 +133,5 @@ export class DataStack extends cdk.Stack {
     // ---- Outputs ----------------------------------------------------------
     new cdk.CfnOutput(this, "TableName", { value: this.table.tableName });
     new cdk.CfnOutput(this, "DocumentsBucketName", { value: this.documentsBucket.bucketName });
-    new cdk.CfnOutput(this, "WidgetBucketName", { value: this.widgetBucket.bucketName });
   }
 }
