@@ -28,5 +28,14 @@ export * from "./domain/knowledge/retrieval-policy.js";
 export * from "./domain/catalog/product.js";
 export * from "./domain/catalog/recommendation.js";
 
+// ---- prompts ----
+export * from "./prompts/system-prompt.js";
+export * from "./prompts/tools.js";
+
+// ---- application ----
+export * from "./application/retrieval.js";
+export * from "./application/tool-registry.js";
+export * from "./application/handle-message.js";
+
 // ---- ports ----
 export * from "./ports/index.js";
