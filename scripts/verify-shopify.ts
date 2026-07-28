@@ -179,23 +179,58 @@ line("non-integer minor units", `${fractional.length} (must be 0)`);
 
 // ---------------------------------------------------------------------------
 
-console.log("\n4. MERCHANDISING TAGS");
-// Every product missing an attribute tag is a product that silently stops
-// matching those queries. This count is the real signal.
-const tagged = page.items.filter(
-  (p) => !warnings.some((w) => w.includes(`"${p.title}"`) && w.includes("missing")),
-).length;
-line("fully tagged", `${tagged}/${page.items.length}`);
+console.log("\n4. METAFIELD COVERAGE");
+//
+// ⚠️ The previous version of this section reported "fully tagged 40/40" by
+// checking warnings for the word "missing" — which the warnings never contain.
+// It was structurally incapable of reporting anything else. A metric that cannot
+// fail is worse than no metric: it reads as reassurance.
+//
+// This counts the attributes themselves.
+const items = page.items;
+const withShape = items.filter((p) => p.attributes.shape !== null).length;
+const withLength = items.filter((p) => p.attributes.length !== null).length;
+const withStyle = items.filter((p) => p.attributes.style !== null).length;
+const withColour = items.filter((p) => p.attributes.colourNotes.length > 0).length;
+const withFinish = items.filter((p) => p.attributes.finishes.length > 0).length;
+const multiFinish = items.filter((p) => p.attributes.finishes.length > 1).length;
+
+const total = items.length;
+line("shape   (custom.nail_text)", `${withShape}/${total}`);
+line("style   (custom.nail_type)", `${withStyle}/${total}`);
+line("colour  (shopify.color-pattern)", `${withColour}/${total}`);
+line("finish  (shopify.finish)", `${withFinish}/${total}`);
+line("  of which multi-finish", `${multiFinish} (must be preserved, not truncated)`);
+line("length  (split from shape)", `${withLength}/${total}`);
+
 line("total warnings", warnings.length);
 for (const warning of warnings.slice(0, 12)) console.log(`     ${warning}`);
 if (warnings.length > 12) console.log(`     ... and ${warnings.length - 12} more`);
 
-if (tagged === 0) {
-  console.log(
-    "\n  No products carry attribute tags yet. Add namespaced tags in the Shopify\n" +
-      "  admin so semantic filtering works, e.g.:\n" +
-      "     shape:almond   length:short   finish:matte   occasion:bridal   level:beginner",
-  );
+// Products carrying no nail attribute at all are accessories — files, removers,
+// glues. Listed so the classification can be eyeballed rather than assumed.
+const accessories = items.filter(
+  (p) =>
+    p.attributes.shape === null &&
+    p.attributes.style === null &&
+    p.attributes.colourNotes.length === 0 &&
+    p.attributes.finishes.length === 0,
+);
+console.log(`\n  Classified as accessories (no nail attributes): ${accessories.length}`);
+for (const p of accessories) console.log(`     ${p.title}`);
+console.log("  ^ these should ALL be non-nail products. A nail set here is a bug.");
+
+// productType is fetched but not yet used for classification. Printing the
+// distinct values is how we find out whether it is a better signal than the
+// attribute heuristic above — measured, not assumed.
+const types = new Map<string, number>();
+for (const p of items) {
+  const t = p.productType || "(empty)";
+  types.set(t, (types.get(t) ?? 0) + 1);
+}
+console.log("\n  Distinct productType values:");
+for (const [t, n] of [...types].sort((a, b) => b[1] - a[1])) {
+  console.log(`     ${n.toString().padStart(3)}  ${t}`);
 }
 
 // ---------------------------------------------------------------------------

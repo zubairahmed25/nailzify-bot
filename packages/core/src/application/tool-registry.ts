@@ -264,12 +264,12 @@ async function runProductDetails(
 function describeAttributes(attrs: {
   readonly shape: string | null;
   readonly length: string | null;
-  readonly finish: string | null;
+  readonly finishes: readonly string[];
 }): string {
   const known = [
     attrs.shape ? `shape: ${attrs.shape}` : "",
     attrs.length ? `length: ${attrs.length}` : "",
-    attrs.finish ? `finish: ${attrs.finish}` : "",
+    attrs.finishes.length > 0 ? `finish: ${attrs.finishes.join(", ")}` : "",
   ].filter(Boolean);
 
   return known.length > 0 ? `    <attributes>${known.join(" | ")}</attributes>` : "";

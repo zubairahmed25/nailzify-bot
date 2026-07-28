@@ -18,7 +18,7 @@
  */
 
 import { assertNever } from "../shared/result.js";
-import { compareMoney, isAtMost, type Money } from "../shared/money.js";
+import { isAtMost, type Money } from "../shared/money.js";
 import type {
   ExperienceLevel,
   NailLength,
@@ -127,17 +127,39 @@ export function selectRecommendations(
     .filter((product) =>
       preferences.maxPrice ? isAtMost(product.price, preferences.maxPrice) : true,
     )
-    .map((product) => score(product, preferences))
-    .sort(byFitThenPrice)
-    .slice(0, limit);
+    // Index captured BEFORE sorting. `products` arrives in semantic-relevance
+    // order from hydrate(), and that order is the only signal we have about what
+    // the customer actually asked for.
+    .map((product, rank) => ({ ...score(product, preferences), rank }))
+    .sort(byFitThenRelevance)
+    .slice(0, limit)
+    .map(({ rank: _rank, ...rec }) => rec);
 }
 
-function byFitThenPrice(a: Recommendation, b: Recommendation): number {
+/**
+ * Fit first, then semantic relevance.
+ *
+ * ⚠️ THE TIE-BREAK USED TO BE PRICE, AND IT WAS A REAL BUG. When a customer
+ * states no structured preference — "what do you have?", the most common opening
+ * message there is — every product scores fit = 0.5, so the tie-break decides
+ * the entire result. Sorting by price meant the four CHEAPEST in-stock items
+ * were returned regardless of what was asked, and the semantic search that had
+ * just run was discarded wholesale.
+ *
+ * On the live catalogue that surfaced "Nail Remover" ($7.99) as the top
+ * recommendation for a customer browsing nails. hydrate() preserves vector rank
+ * specifically so it can be used here; the old comparator threw it away one line
+ * later.
+ *
+ * Relevance order is just as deterministic as price — the same query returns the
+ * same order — so the original goal is met without the pathology.
+ */
+function byFitThenRelevance(
+  a: Recommendation & { rank: number },
+  b: Recommendation & { rank: number },
+): number {
   const byFit = b.fit - a.fit;
-  // Tie-break on price ascending. Deterministic ordering matters more than the
-  // specific rule: without it, two equally-good products swap places between
-  // requests and the bot appears to change its mind for no reason.
-  return byFit !== 0 ? byFit : compareMoney(a.product.price, b.product.price);
+  return byFit !== 0 ? byFit : a.rank - b.rank;
 }
 
 function score(product: Product, prefs: CustomerPreferences): Recommendation {
@@ -202,15 +224,15 @@ function score(product: Product, prefs: CustomerPreferences): Recommendation {
     // "cat-eye" are how customers describe what they want, and that field is the
     // only place those words live. Omitting it made 35 of 40 products
     // unreachable by the phrasing customers actually use.
-    const haystack = [...attrs.colourNotes, attrs.finish, attrs.style]
+    const haystack = [...attrs.colourNotes, ...attrs.finishes, attrs.style]
       .join(" ")
       .toLowerCase();
     const hits = prefs.styleNotes.filter((note) => haystack.includes(note.toLowerCase()));
     if (hits.length > 0) {
       earned += WEIGHT.style * (hits.length / prefs.styleNotes.length);
       reasons.push(
-        attrs.finish
-          ? `${attrs.finish} finish in ${attrs.colourNotes.join(", ")}`
+        attrs.finishes.length > 0
+          ? `${attrs.finishes.join(" and ")} finish in ${attrs.colourNotes.join(", ")}`
           : `${attrs.colourNotes.join(", ")}`,
       );
     }

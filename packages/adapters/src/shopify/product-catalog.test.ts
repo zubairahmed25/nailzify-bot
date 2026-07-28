@@ -251,7 +251,7 @@ describe("the two planes joined", () => {
         attributes: {
           shape: "almond",
           length: "short",
-          finish: "matte",
+          finishes: ["matte"],
           occasions: ["everyday"],
           suitableFor: ["beginner"],
           colourNotes: [],
@@ -265,7 +265,7 @@ describe("the two planes joined", () => {
         attributes: {
           shape: "almond",
           length: "short",
-          finish: "matte",
+          finishes: ["matte"],
           occasions: ["everyday"],
           suitableFor: ["beginner"],
           colourNotes: [],

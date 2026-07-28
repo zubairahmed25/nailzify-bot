@@ -17,7 +17,7 @@ import { recommendSetSize, selectRecommendations } from "./recommendation.js";
 const baseAttributes: ProductAttributes = {
   shape: "almond",
   length: "short",
-  finish: "matte",
+  finishes: ["matte"],
   occasions: ["everyday", "professional"],
   suitableFor: ["beginner", "comfortable"],
   colourNotes: ["warm nude"],
@@ -30,6 +30,7 @@ function product(id: string, overrides: Partial<Omit<Product, "id">> = {}): Prod
     handle: ProductHandle(`handle-${id}`),
     title: `Product ${id}`,
     description: "",
+    productType: "Press-on Nails",
     url: `https://nailzify.com/products/${id}`,
     imageUrl: null,
     price: money(1800, "USD"),
@@ -146,15 +147,39 @@ describe("selectRecommendations", () => {
 
   it("returns a stable order when fit ties", () => {
     // Without a deterministic tie-break the bot appears to change its mind
-    // between identical requests.
-    const cheap = product("cheap", { price: money(1000, "USD") });
-    const pricey = product("pricey", { price: money(2000, "USD") });
+    // between identical requests. Relevance order is deterministic too — the
+    // same query produces the same candidate order — so this still holds.
+    const a = product("a", { price: money(2000, "USD") });
+    const b = product("b", { price: money(1000, "USD") });
 
-    const first = selectRecommendations([pricey, cheap], {});
-    const second = selectRecommendations([cheap, pricey], {});
+    expect(selectRecommendations([a, b], {}).map((r) => r.product.id)).toEqual(
+      selectRecommendations([a, b], {}).map((r) => r.product.id),
+    );
+  });
 
-    expect(first.map((r) => r.product.id)).toEqual(second.map((r) => r.product.id));
-    expect(first[0]!.product.id).toBe(ProductId("cheap"));
+  it("keeps semantic rank when nothing distinguishes the products", () => {
+    // THE LIVE BUG. A browsing customer states no structured preference, so every
+    // product scores fit = 0.5 and the tie-break decides the whole result. It used
+    // to be price, which returned the four cheapest items in the store regardless
+    // of the question. On the real catalogue that put "Nail Remover" ($7.99) top
+    // for someone shopping for nails.
+    const semanticOrder = [
+      product("azure", { price: money(1399, "USD") }),
+      product("cotton-candy", { price: money(1299, "USD") }),
+      product("nail-remover", { price: money(799, "USD") }),
+    ];
+
+    const result = selectRecommendations(semanticOrder, {});
+
+    expect(result.map((r) => r.product.id)).toEqual([
+      ProductId("azure"),
+      ProductId("cotton-candy"),
+      ProductId("nail-remover"),
+    ]);
+  });
+
+  it("does not leak the internal rank field to callers", () => {
+    expect(selectRecommendations([product("1")], {})[0]).not.toHaveProperty("rank");
   });
 
   it("always supplies a reason the model can quote", () => {
@@ -169,10 +194,10 @@ describe("selectRecommendations", () => {
 
   it("matches style notes against colour and finish", () => {
     const matte = product("matte", {
-      attributes: { ...baseAttributes, finish: "matte", colourNotes: ["terracotta"] },
+      attributes: { ...baseAttributes, finishes: ["matte"], colourNotes: ["terracotta"] },
     });
     const gloss = product("gloss", {
-      attributes: { ...baseAttributes, finish: "gloss", colourNotes: ["silver"] },
+      attributes: { ...baseAttributes, finishes: ["gloss"], colourNotes: ["silver"] },
     });
 
     const result = selectRecommendations([gloss, matte], { styleNotes: ["terracotta"] });

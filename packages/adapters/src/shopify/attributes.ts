@@ -92,6 +92,18 @@ const LENGTHS: Record<string, NailLength> = {
  */
 const PATTERNS = new Set(["floral", "geometric", "abstract", "striped", "animal print"]);
 
+/**
+ * True when a product carries any evidence of being a nail set.
+ *
+ * Deliberately permissive — ANY of the four fields counts. Nailzify sells a nail
+ * file, a remover and two glues alongside 36 nail sets, and none of the four
+ * accessories has a shape, style, colour or finish. A nail set missing only its
+ * shape still trips this, which is exactly the case worth warning about.
+ */
+function hasAnyNailAttribute(raw: RawMetafields): boolean {
+  return Boolean(raw.style) || raw.colours.length > 0 || raw.finishes.length > 0;
+}
+
 export function parseMetafields(raw: RawMetafields, productTitle: string): ParsedAttributes {
   const warnings: string[] = [];
 
@@ -115,23 +127,32 @@ export function parseMetafields(raw: RawMetafields, productTitle: string): Parse
           `Expected one of ${Object.keys(SHAPES).join(", ")}.`,
       );
     }
-  } else {
+  } else if (hasAnyNailAttribute(raw)) {
+    // Only a warning when the product is evidently a nail set that is MISSING a
+    // shape. A product with no shape, style, colour or finish is an accessory —
+    // a file, a remover, a glue — and has no nail shape by nature.
+    //
+    // 4 of the 7 warnings on the live catalogue were accessories reported as
+    // broken nail sets. That is worse than useless: it is the noise that trains
+    // a merchandiser to stop reading warnings, and it buried the one product
+    // ("Snowflake Wishes") that genuinely was a nail set missing its shape.
     warnings.push(`"${productTitle}": no shape metafield (custom.nail_text)`);
   }
 
-  // ---- finish ---------------------------------------------------------------
-  let finish: NailFinish | null = null;
-  if (raw.finishes.length > 0) {
-    const first = raw.finishes[0]!.trim().toLowerCase();
-    finish = FINISHES[first] ?? null;
-    if (!finish) {
+  // ---- finishes -------------------------------------------------------------
+  //
+  // Keep every one. This used to take `[0]` and warn that it was discarding the
+  // rest, which turned a correctly merchandised product into a warning and lost
+  // real data: "Frozen" and "Chloe" are both Gloss AND Metallic, and dropping
+  // the second made them unfindable by "metallic".
+  const finishes: NailFinish[] = [];
+  for (const raw_finish of raw.finishes) {
+    const mapped = FINISHES[raw_finish.trim().toLowerCase()];
+    if (mapped) {
+      if (!finishes.includes(mapped)) finishes.push(mapped);
+    } else {
       warnings.push(
-        `"${productTitle}": unrecognised finish "${raw.finishes[0]}" — left unknown.`,
-      );
-    }
-    if (raw.finishes.length > 1) {
-      warnings.push(
-        `"${productTitle}": multiple finishes (${raw.finishes.join(", ")}), using the first.`,
+        `"${productTitle}": unrecognised finish "${raw_finish}" — left unknown.`,
       );
     }
   }
@@ -149,7 +170,7 @@ export function parseMetafields(raw: RawMetafields, productTitle: string): Parse
     attributes: {
       shape,
       length,
-      finish,
+      finishes,
       // Occasion is not stored anywhere on the store. "everyday" is the only
       // honest default: unlike a shape, it makes no specific claim a customer
       // could be misled by, and it only affects which queries surface a product.
@@ -192,7 +213,7 @@ export function productEmbeddingText(input: {
     input.description,
     a.shape ? `Shape: ${a.shape}` : "",
     a.length ? `Length: ${a.length}` : "",
-    a.finish ? `Finish: ${a.finish}` : "",
+    a.finishes.length > 0 ? `Finish: ${a.finishes.join(", ")}` : "",
     // The dimension customers actually search by — "chrome nails", "french tips".
     a.style ? `Style: ${a.style}` : "",
     colours.length > 0 ? `Colours: ${colours.join(", ")}` : "",

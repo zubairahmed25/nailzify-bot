@@ -227,6 +227,7 @@ function toProduct(
     handle: ProductHandle(raw.handle),
     title: raw.title,
     description: raw.description,
+    productType: raw.productType,
     // onlineStoreUrl is null for products not published to the Online Store
     // channel. Sending a customer to "null" is worse than a constructed link.
     url: raw.onlineStoreUrl ?? `https://${storefrontDomain}/products/${raw.handle}`,

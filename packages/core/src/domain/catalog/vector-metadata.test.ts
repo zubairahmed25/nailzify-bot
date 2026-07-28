@@ -14,7 +14,7 @@ function readerFor(m: Record<string, unknown>) {
 const full: ProductAttributes = {
   shape: "almond",
   length: "short",
-  finish: "matte",
+  finishes: ["matte", "metallic"],
   style: "3D Cat-eye",
   occasions: ["bridal", "party"],
   suitableFor: ["beginner"],
@@ -41,7 +41,7 @@ describe("vector metadata round-trip", () => {
     const empty: ProductAttributes = {
       shape: null,
       length: null,
-      finish: null,
+      finishes: [],
       style: null,
       occasions: [],
       suitableFor: [],
@@ -61,11 +61,12 @@ describe("vector metadata round-trip", () => {
     const metadata = productVectorMetadata({
       productId: ProductId("gid://shopify/Product/3"),
       priceBand: "15-25",
-      attributes: { ...full, shape: null, style: null },
+      attributes: { ...full, shape: null, style: null, finishes: [] },
     });
 
     expect(metadata).not.toHaveProperty("shape");
     expect(metadata).not.toHaveProperty("style");
+    expect(metadata).not.toHaveProperty("finishes");
   });
 
   it("stores NO price and NO stock", () => {

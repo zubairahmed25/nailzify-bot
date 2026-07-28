@@ -96,7 +96,14 @@ export type ExperienceLevel = "beginner" | "comfortable" | "experienced";
 export interface ProductAttributes {
   readonly shape: NailShape | null;
   readonly length: NailLength | null;
-  readonly finish: NailFinish | null;
+  /**
+   * ⚠️ A LIST, NOT A SCALAR. `shopify.finish` is declared
+   * `list.metaobject_reference` — Shopify itself says it is multi-valued, and
+   * two live products ("Frozen", "Chloe") carry Gloss AND Metallic. Modelling it
+   * as one value silently discarded the second, so searching "metallic" could
+   * not find either of them. Empty means unknown.
+   */
+  readonly finishes: readonly NailFinish[];
   readonly occasions: readonly Occasion[];
   readonly suitableFor: readonly ExperienceLevel[];
   /** From `shopify.color-pattern`, e.g. ["Pink"], ["Floral"]. */
@@ -160,6 +167,12 @@ export interface Product {
   readonly handle: ProductHandle;
   readonly title: string;
   readonly description: string;
+  /**
+   * Shopify's own `productType`. Carried through because it is the field that
+   * distinguishes a nail set from a file, a remover or a glue — a distinction
+   * the attribute metafields only imply.
+   */
+  readonly productType: string;
   readonly url: string;
   readonly imageUrl: string | null;
   readonly price: Money;
@@ -271,7 +284,7 @@ export function productVectorMetadata(input: {
     // for metadata size honest.
     ...(a.shape ? { shape: a.shape } : {}),
     ...(a.length ? { length: a.length } : {}),
-    ...(a.finish ? { finish: a.finish } : {}),
+    ...(a.finishes.length > 0 ? { finishes: [...a.finishes] } : {}),
     ...(a.style ? { style: a.style } : {}),
     occasions: [...a.occasions],
     suitableFor: [...a.suitableFor],
@@ -293,7 +306,7 @@ export function productAttributesFromMetadata(read: {
   return {
     shape: (read.str("shape") || null) as NailShape | null,
     length: (read.str("length") || null) as NailLength | null,
-    finish: (read.str("finish") || null) as NailFinish | null,
+    finishes: read.strArray("finishes") as NailFinish[],
     style: read.str("style") || null,
     occasions: read.strArray("occasions") as Occasion[],
     suitableFor: read.strArray("suitableFor") as ExperienceLevel[],

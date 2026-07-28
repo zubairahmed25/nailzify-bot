@@ -17,7 +17,7 @@ describe("parsing metafields", () => {
     });
 
     expect(attributes.shape).toBe("almond");
-    expect(attributes.finish).toBe("matte");
+    expect(attributes.finishes).toEqual(["matte"]);
     expect(attributes.style).toBe("Chrome");
     expect(attributes.colourNotes).toEqual(["Pink"]);
   });
@@ -27,7 +27,7 @@ describe("parsing metafields", () => {
     const { attributes } = parse({ shape: "  ALMOND ", finishes: [" Gloss "] });
 
     expect(attributes.shape).toBe("almond");
-    expect(attributes.finish).toBe("gloss");
+    expect(attributes.finishes).toEqual(["gloss"]);
   });
 
   it("splits a length out of a compound shape value", () => {
@@ -50,7 +50,7 @@ describe("parsing metafields", () => {
   });
 
   it("treats glossy as gloss", () => {
-    expect(parse({ finishes: ["Glossy"] }).attributes.finish).toBe("gloss");
+    expect(parse({ finishes: ["Glossy"] }).attributes.finishes).toEqual(["gloss"]);
   });
 
   it("keeps style verbatim rather than normalising it", () => {
@@ -73,12 +73,20 @@ describe("warnings make silent merchandising bugs visible", () => {
     expect(warnings.some((w) => w.includes("Almnod"))).toBe(true);
   });
 
-  it("warns when the shape metafield is missing entirely", () => {
-    // 5 of 40 live products. Silence here would make a gap invisible.
-    const { attributes, warnings } = parse({});
+  it("warns when a nail set is missing its shape", () => {
+    // "Snowflake Wishes" on the live catalogue — clearly a nail set (it has a
+    // colour) but with no shape metafield. The one genuine merchandising gap.
+    const { attributes, warnings } = parse({ colours: ["White"] });
 
     expect(attributes.shape).toBeNull();
     expect(warnings.some((w) => w.includes("custom.nail_text"))).toBe(true);
+  });
+
+  it("does NOT warn about an accessory having no nail shape", () => {
+    // A nail file, a remover and two glues have no shape by nature. Reporting
+    // them as broken nail sets was 4 of the 7 live warnings — the noise that
+    // trains a merchandiser to stop reading warnings at all.
+    expect(parse({}).warnings).toEqual([]);
   });
 
   it("invents nothing for a product with no metafields at all", () => {
@@ -86,23 +94,34 @@ describe("warnings make silent merchandising bugs visible", () => {
 
     expect(attributes.shape).toBeNull();
     expect(attributes.length).toBeNull();
-    expect(attributes.finish).toBeNull();
+    expect(attributes.finishes).toEqual([]);
     expect(attributes.style).toBeNull();
     expect(attributes.colourNotes).toEqual([]);
   });
 
-  it("warns on an unrecognised finish and leaves it null", () => {
+  it("warns on an unrecognised finish and stores nothing", () => {
     const { attributes, warnings } = parse({ finishes: ["Holographic"] });
 
-    expect(attributes.finish).toBeNull();
+    expect(attributes.finishes).toEqual([]);
     expect(warnings.some((w) => w.includes("Holographic"))).toBe(true);
   });
 
-  it("warns when multiple finishes are set and uses the first", () => {
-    const { attributes, warnings } = parse({ finishes: ["Matte", "Gloss"] });
+  it("keeps every finish rather than discarding all but the first", () => {
+    // "Frozen" and "Chloe" are live products carrying Gloss AND Metallic.
+    // shopify.finish is declared `list.metaobject_reference` — Shopify itself
+    // says it is multi-valued. Taking [0] lost real data, made both products
+    // unfindable by "metallic", and warned about correct merchandising.
+    const { attributes, warnings } = parse({ shape: "Almond", finishes: ["Gloss", "Metallic"] });
 
-    expect(attributes.finish).toBe("matte");
-    expect(warnings.some((w) => w.includes("multiple finishes"))).toBe(true);
+    expect(attributes.finishes).toEqual(["gloss", "metallic"]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("keeps the recognised finishes and warns only about the unknown one", () => {
+    const { attributes, warnings } = parse({ finishes: ["Gloss", "Holographic"] });
+
+    expect(attributes.finishes).toEqual(["gloss"]);
+    expect(warnings.some((w) => w.includes("Holographic"))).toBe(true);
   });
 
   it("stays quiet for a fully populated product", () => {

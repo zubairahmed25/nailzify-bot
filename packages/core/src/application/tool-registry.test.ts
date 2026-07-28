@@ -25,7 +25,7 @@ import { TOOL_NAMES } from "../prompts/tools.js";
 const attrs: ProductAttributes = {
   shape: "almond",
   length: "short",
-  finish: "matte",
+  finishes: ["matte"],
   occasions: ["bridal"],
   suitableFor: ["beginner"],
   colourNotes: ["warm nude"],
@@ -56,6 +56,7 @@ function product(over: Partial<Product> = {}): Product {
     handle: ProductHandle("bridal-almond-short"),
     title: "Bridal Almond — Short",
     description: "",
+    productType: "Press-on Nails",
     url: "https://nailzify.com/products/bridal-almond-short",
     imageUrl: null,
     price: money(2400, "USD"),
