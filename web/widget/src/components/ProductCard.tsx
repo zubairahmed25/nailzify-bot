@@ -23,20 +23,22 @@ export function ProductCard({ product }: { product: ProductRef }) {
       rel="noopener"
       aria-label={`${product.title}, ${product.price}${product.available ? "" : ", sold out"}`}
     >
-      {product.imageUrl ? (
-        // `loading="lazy"` because a long conversation can accumulate a dozen of
-        // these on a page the merchant already paid to make fast.
-        <img class="nz-card__img" src={product.imageUrl} alt="" loading="lazy" decoding="async" />
-      ) : (
-        <div class="nz-card__img nz-card__img--empty" aria-hidden="true" />
-      )}
+      <div class="nz-card__media">
+        {product.imageUrl ? (
+          // `loading="lazy"` because a long conversation can accumulate a dozen
+          // of these on a page the merchant already paid to make fast.
+          <img class="nz-card__img" src={product.imageUrl} alt="" loading="lazy" decoding="async" />
+        ) : (
+          <div class="nz-card__img nz-card__img--empty" aria-hidden="true" />
+        )}
+        {/* On the image, not in the text row — a customer scanning tiles decides
+            whether to tap before reading anything below. */}
+        {!product.available && <span class="nz-card__sold">Sold out</span>}
+      </div>
 
       <div class="nz-card__body">
         <span class="nz-card__title">{product.title}</span>
-        <span class="nz-card__price">
-          {product.price}
-          {!product.available && <span class="nz-card__sold"> · Sold out</span>}
-        </span>
+        <span class="nz-card__price">{product.price}</span>
       </div>
     </a>
   );

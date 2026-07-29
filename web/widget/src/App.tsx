@@ -1,7 +1,29 @@
 import { useEffect, useRef, useState } from "react";
+import { loadFont } from "./index.js";
 import { Composer } from "./components/Composer.js";
 import { Message } from "./components/Message.js";
 import { loadPersistedState, savePersistedState, useChat } from "./useChat.js";
+
+/** Support headphones. Stroked with currentColor so the button owns the colour. */
+function HeadphonesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 15v-3a8 8 0 0 1 16 0v3" />
+      <path d="M6 19a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2h1a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1z" />
+      <path d="M18 19a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-1a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1z" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
 
 const GREETING =
   "Hi! I can help you find a set, work out your size, or answer questions about " +
@@ -57,7 +79,9 @@ export function App() {
   }, [open]);
 
   useEffect(() => {
-    if (open) panel.current?.querySelector("textarea")?.focus();
+    if (!open) return;
+    loadFont();
+    panel.current?.querySelector("textarea")?.focus();
   }, [open]);
 
   // ---- scroll lock ---------------------------------------------------------
@@ -110,7 +134,12 @@ export function App() {
         aria-controls="nz-panel"
         aria-label={open ? "Close chat" : "Chat with us about nails"}
       >
-        {open ? "✕" : "💬"}
+        {/* ⚠️ AN SVG, NOT AN EMOJI. The old 💬 rendered as a different glyph on
+            every platform — Apple, Google and Microsoft draw unrelated speech
+            bubbles, none of them in the brand colour, and the merchant had no
+            control over any of it. An inline path is identical everywhere and
+            inherits currentColor. */}
+        {open ? <CloseIcon /> : <HeadphonesIcon />}
       </button>
 
       <div

@@ -6,28 +6,72 @@
  * someone inspects a storefront.
  */
 :host {
-  --nz-bg: #ffffff;
-  --nz-fg: #1a1a1a;
-  --nz-muted: #6b6b6b;
-  --nz-accent: #c9788f;
-  --nz-border: #e8e2e4;
+  /* Panel canvas. The bubbles sit on this, so they must NOT also be this —
+     the message shape is what makes a conversation readable. */
+  --nz-bg: #fff5f5;
+  --nz-surface: #ffffff;
+
+  /* Warm near-black. Pure #000 on a pink canvas reads as a rendering fault. */
+  --nz-fg: #3a2c30;
+  /* Darkened from #8c7a7e, which measured 4.04:1 on white — under the 4.5:1
+     bar, and this is the colour PRICES render in. 5.2:1 on white, 4.9:1 on the
+     pink panel, so it passes on both surfaces it appears against. */
+  --nz-muted: #7a686c;
+
+  --nz-accent: #ff80aa;
+  /*
+   * ⚠️ A SEPARATE, DEEPER PINK FOR TEXT ON WHITE.
+   *
+   * --nz-accent on white measures 2.2:1 — a link in it is barely readable, which
+   * is the exact bug fixed a few commits ago when links inherited body colour.
+   * This shade keeps the family at 4.6:1.
+   */
+  --nz-accent-text: #c43a6b;
+
+  /*
+   * ⚠️ TEXT ON THE ACCENT IS DARK, NOT WHITE.
+   *
+   * White on #ff80aa is 2.35:1 — failing WCAG for text (4.5:1) AND for UI
+   * components (3:1). The warm near-black is 5.6:1. Hot pink simply is not dark
+   * enough to carry white; the alternative was a deeper pink than the brand.
+   */
+  --nz-on-accent: #3a2c30;
+
+  --nz-border: #f2dee4;
   --nz-radius: 14px;
+
+  /* Two layers: a tight contact shadow plus a soft ambient one. A single large
+     blur reads as a glow rather than lift. */
+  --nz-shadow: 0 1px 2px rgb(58 44 48 / 0.06), 0 2px 8px rgb(58 44 48 / 0.05);
+  --nz-shadow-card: 0 1px 2px rgb(58 44 48 / 0.07), 0 3px 10px rgb(58 44 48 / 0.07);
 
   /* A high z-index because themes and cookie banners fight over this space.
      Not 2147483647: leaving headroom means a genuinely modal element — a
      checkout overlay — can still sit above us, which it should. */
   all: initial;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /*
+   * ⚠️ JOSEFIN SANS HAS A SMALL X-HEIGHT. At an identical font-size it reads
+   * noticeably smaller than system-ui, so the base is 15px rather than 14px —
+   * matching the number, not the metric, would have shrunk every message.
+   *
+   * The fallback list matters more than usual: the face is fetched from Google
+   * on first open, so the first paint of every panel uses it.
+   */
+  font-family: "Josefin Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-weight: 300;
 }
 
-@media (prefers-color-scheme: dark) {
-  :host {
-    --nz-bg: #1c1a1b;
-    --nz-fg: #f2eef0;
-    --nz-muted: #a89ea2;
-    --nz-border: #3a3436;
-  }
-}
+/*
+ * ⚠️ NO DARK MODE, DELIBERATELY.
+ *
+ * There was a `prefers-color-scheme: dark` block here, and it fired on the
+ * store owner's own machine — the widget rendered near-black on a storefront
+ * that is light for every visitor regardless of their OS setting.
+ *
+ * A chat panel is part of the shop's brand, not part of the operating system.
+ * Following the visitor's theme made it the only dark element on a light page.
+ */
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -36,16 +80,21 @@
   right: 20px;
   bottom: 20px;
   z-index: 2147482000;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   border-radius: 50%;
   background: var(--nz-accent);
-  color: #fff;
-  font-size: 22px;
+  color: var(--nz-on-accent);
   cursor: pointer;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+  /* Tinted with the accent rather than neutral black, so the button reads as
+     lifted off a pink page instead of stamped onto it. */
+  box-shadow: 0 4px 16px rgb(255 128 170 / 0.42);
 }
+.nz-launcher svg { width: 30px; height: 30px; }
 
 .nz-launcher:focus-visible { outline: 3px solid var(--nz-fg); outline-offset: 2px; }
 
@@ -112,8 +161,9 @@
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid var(--nz-border);
+  background: var(--nz-surface);
 }
-.nz-header__title { font-weight: 600; font-size: 15px; }
+.nz-header__title { font-weight: 600; font-size: 16px; letter-spacing: 0.01em; }
 .nz-header__close {
   border: none; background: none; color: var(--nz-muted);
   font-size: 15px; cursor: pointer; padding: 4px 8px;
@@ -136,16 +186,25 @@
 
 .nz-bubble {
   max-width: 88%;
-  padding: 9px 12px;
+  padding: 10px 13px;
   border-radius: var(--nz-radius);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  /* Looser than the 1.5 that suited system-ui. A light geometric face needs more
+     leading or the lines start to blur together in a paragraph. */
+  line-height: 1.6;
   /* A long product handle or URL must wrap rather than force the panel wide. */
   overflow-wrap: anywhere;
 }
-.nz-msg--customer .nz-bubble { background: var(--nz-accent); color: #fff; }
-.nz-msg--assistant .nz-bubble { background: color-mix(in srgb, var(--nz-fg) 6%, transparent); }
-.nz-msg--failed .nz-bubble { border: 1px solid #d97070; }
+.nz-msg--customer .nz-bubble {
+  background: var(--nz-accent);
+  color: var(--nz-on-accent);
+  box-shadow: 0 1px 2px rgb(58 44 48 / 0.08), 0 2px 8px rgb(255 128 170 / 0.24);
+}
+.nz-msg--assistant .nz-bubble {
+  background: var(--nz-surface);
+  box-shadow: var(--nz-shadow);
+}
+.nz-msg--failed .nz-bubble { box-shadow: 0 0 0 1px #d97070; }
 
 .nz-bubble p { margin: 0 0 8px; }
 .nz-bubble p:last-child { margin-bottom: 0; }
@@ -161,51 +220,75 @@
  * customer had no way to know it was clickable, and reported it as broken.
  */
 .nz-bubble a {
-  color: var(--nz-accent);
+  color: var(--nz-accent-text);
   text-decoration: underline;
   text-underline-offset: 2px;
   font-weight: 600;
 }
-.nz-msg--customer .nz-bubble a { color: inherit; }
+.nz-msg--customer .nz-bubble a { color: var(--nz-on-accent); }
 
-/* Cards sit outside the bubble and take the full width — they are the answer,
-   not a footnote to it. */
-.nz-products { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; width: 100%; }
+/*
+ * Two per row, square images. A customer comparing sets is comparing how they
+ * LOOK, and a 64px thumbnail in a horizontal row shows almost none of that.
+ * Two columns fit four products in the space one row of three used to take.
+ */
+.nz-products {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+  width: 100%;
+}
 
 .nz-card {
-  display: flex; gap: 12px; align-items: center;
-  padding: 10px;
-  border: 1px solid var(--nz-border);
+  display: block;
   border-radius: 12px;
+  overflow: hidden;
   text-decoration: none;
   color: inherit;
-  background: var(--nz-bg);
-  transition: border-color 120ms ease, transform 120ms ease;
+  background: var(--nz-surface);
+  /* Shadow instead of a border. With both, the tile read as heavy and muddied
+     the pink around it. */
+  box-shadow: var(--nz-shadow-card);
+  transition: transform 120ms ease, box-shadow 120ms ease;
 }
-.nz-card:hover { border-color: var(--nz-accent); transform: translateY(-1px); }
-.nz-card:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
+.nz-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgb(58 44 48 / 0.08), 0 6px 16px rgb(58 44 48 / 0.1);
+}
+.nz-card:focus-visible { outline: 2px solid var(--nz-accent-text); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .nz-card { transition: none; } }
-
-/* A visible affordance. Without it a card reads as a summary, not something to
-   tap — the same mistake the unstyled links made. */
-.nz-card::after {
-  content: "›";
-  margin-left: auto;
-  color: var(--nz-muted);
-  font-size: 18px;
-  line-height: 1;
-}
+.nz-card__media { position: relative; aspect-ratio: 1 / 1; background: #fbe6ec; }
 .nz-card__img {
-  width: 64px; height: 64px; border-radius: 8px; object-fit: cover; flex-shrink: 0;
+  width: 100%; height: 100%; object-fit: cover; display: block;
 }
-.nz-card__img--empty { background: color-mix(in srgb, var(--nz-fg) 8%, transparent); }
-.nz-card__body { display: flex; flex-direction: column; min-width: 0; }
+.nz-card__img--empty { background: #fbe6ec; }
+
+/*
+ * Sold-out sits ON the image, not in the text row below.
+ *
+ * In a two-up grid that row is one line tall, and a customer scanning tiles
+ * decides whether to tap before they read it. Discovering it after the tap is
+ * the worst place to find out.
+ */
+.nz-card__sold {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--nz-fg);
+  color: var(--nz-bg);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 20px;
+}
+.nz-card__body { display: flex; flex-direction: column; min-width: 0; padding: 8px 10px 10px; }
+/* One line, truncated. "Brush-On Nail Glue (No UV Light Needed)" would wrap to
+   three lines and break the alignment of every tile beside it. */
 .nz-card__title {
   font-size: 14px; font-weight: 600; margin-bottom: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.nz-card__price { font-size: 13px; color: var(--nz-muted); }
-.nz-card__sold { color: #d97070; }
+.nz-card__price { font-size: 14px; color: var(--nz-muted); }
 
 /*
  * Tables. The size chart is six columns inside a 380px panel, so it scrolls
@@ -234,11 +317,12 @@
 /* The first column is the label a customer scans down — keep it legible. */
 .nz-table td:first-child { font-weight: 600; }
 
-.nz-status { font-size: 12px; color: var(--nz-muted); min-height: 16px; padding-left: 2px; }
+.nz-status { font-size: 13px; color: var(--nz-muted); min-height: 16px; padding-left: 2px; }
 
 .nz-composer {
   display: flex; gap: 8px; align-items: flex-end;
   padding: 10px; border-top: 1px solid var(--nz-border);
+  background: var(--nz-surface);
 }
 
 .nz-input {
@@ -262,13 +346,15 @@
 .nz-send {
   width: 38px; height: 38px; flex-shrink: 0;
   border: none; border-radius: 50%;
-  background: var(--nz-accent); color: #fff;
+  background: var(--nz-accent); color: var(--nz-on-accent);
   font-size: 16px; cursor: pointer;
+  box-shadow: 0 2px 8px rgb(255 128 170 / 0.38);
 }
 .nz-send:disabled { opacity: 0.4; cursor: default; }
 .nz-send--stop { background: var(--nz-muted); }
 
 .nz-footer {
   margin: 0; padding: 0 12px 10px;
+  background: var(--nz-surface);
   font-size: 11px; color: var(--nz-muted); text-align: center;
 }

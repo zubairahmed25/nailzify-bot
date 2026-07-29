@@ -24,6 +24,44 @@ import { App } from "./App.js";
 import styles from "./styles.css?inline";
 
 const HOST_ID = "nailzify-concierge";
+const FONT_ID = "nailzify-concierge-font";
+
+/**
+ * Load Josefin Sans.
+ *
+ * ⚠️ THIS MUST GO IN document.head, NOT THE SHADOW ROOT. `@font-face` is
+ * resolved against the DOCUMENT, not the shadow tree — a face declared inside
+ * the shadow stylesheet is silently ignored and the widget falls back to
+ * system-ui with no error. The one styling rule that deliberately reaches
+ * outside the boundary, and it has to.
+ *
+ * ⚠️ CALLED ON FIRST OPEN, NOT ON MOUNT. This script runs on every storefront
+ * page; most visitors never open the chat. Fetching a webfont for all of them to
+ * serve the few who do is a cost the merchant pays on every page view. The
+ * launcher is an icon with no text, so nothing visible needs the font until the
+ * panel opens.
+ *
+ * `display=swap` means the panel renders immediately in the fallback and swaps
+ * when the font lands — invisible behind the open animation.
+ */
+export function loadFont(): void {
+  if (document.getElementById(FONT_ID)) return;
+
+  const preconnect = document.createElement("link");
+  preconnect.rel = "preconnect";
+  preconnect.href = "https://fonts.gstatic.com";
+  preconnect.crossOrigin = "";
+  document.head.appendChild(preconnect);
+
+  const link = document.createElement("link");
+  link.id = FONT_ID;
+  link.rel = "stylesheet";
+  // 300 for body as specified; 600 for emphasis, because bolding a 300 weight
+  // by synthesis looks smeared and Josefin ships a real semibold.
+  link.href =
+    "https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;600&display=swap";
+  document.head.appendChild(link);
+}
 
 function mount(): void {
   // Idempotent. A theme that includes the script twice, or a section that
