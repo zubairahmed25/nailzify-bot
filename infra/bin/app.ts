@@ -44,7 +44,20 @@ const config = {
   // `anthropic.claude-sonnet-4-6` returns ValidationException — current Claude
   // models on Bedrock require a cross-region profile, and the error does not
   // say so (docs/02-aws-services.md §2.1).
-  chatModelId: "us.anthropic.claude-sonnet-5",
+  // ⚠️ MODEL ACCESS IS PER-ACCOUNT AND PER-MODEL, AND IT IS NOT AUTOMATIC.
+  //
+  // These were pinned to Claude Sonnet 5, which this account cannot invoke:
+  //
+  //   403 anthropic.claude-sonnet-5 is not available for this account
+  //
+  // Probed with bedrock-runtime converse against each candidate. Sonnet 4.6 and
+  // Haiku 4.5 succeed; Sonnet 5 is denied. Nothing degrades gracefully here on
+  // purpose — silently downgrading the model would change answer quality with
+  // no one aware, so the request fails and says why.
+  //
+  // Request access in the Bedrock console (Model access) and change this back.
+  // Re-probe rather than assume: access is granted per model, not per family.
+  chatModelId: "us.anthropic.claude-sonnet-4-6",
   fastModelId: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
   embedModelId: "cohere.embed-v4:0",
   rerankModelId: "cohere.rerank-v3-5:0",

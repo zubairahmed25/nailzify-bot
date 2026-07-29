@@ -69,7 +69,19 @@ export const DEFAULT_MODELS: ModelRoleMap = {
   judge: "us.anthropic.claude-sonnet-5",
 };
 
-/** Verified reachable on accounts without Claude 5 access. */
+/**
+ * Models verified reachable on accounts without Claude 5 access.
+ *
+ * ⚠️ NOTHING FALLS BACK TO THIS AUTOMATICALLY, despite the name. It is a value
+ * a caller may choose, not behaviour the client provides — and the deployed
+ * Lambda did not choose it, so a Sonnet 5 access denial reached a customer as an
+ * empty reply while this constant sat here looking like a safety net.
+ *
+ * Automatic fallback is deliberately NOT implemented. Silently switching models
+ * on an access error changes answer quality with nobody aware it happened, and
+ * "why did the bot get worse last Tuesday" is a far harder question than a 403.
+ * Choose the model explicitly; let the failure be loud.
+ */
 export const FALLBACK_MODELS: ModelRoleMap = {
   chat: "us.anthropic.claude-sonnet-4-6",
   fast: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
