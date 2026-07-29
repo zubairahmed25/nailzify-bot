@@ -38,26 +38,53 @@ const scored = (id: string, score: number, rerankScore: number | null = null): S
  *
  * Reproduce with: npx vite-node scripts/verify-retrieval.ts
  */
+/**
+ * Measured by scripts/verify-retrieval.ts against the REAL corpus — the two
+ * documents the store actually publishes (return-policy, size-guide, 7 chunks).
+ *
+ * ⚠️ THESE NUMBERS REPLACED AN EARLIER SET TAKEN FROM THREE INVENTED DOCUMENTS.
+ * The old fixtures included a shipping policy and a nail care guide Nailzify
+ * does not have, so every threshold derived from them was fitted to a corpus
+ * that did not exist. `customsFees` and `wearTime` are gone for that reason —
+ * not because those questions stopped mattering, but because nothing in the
+ * store answers them (see UNANSWERABLE below).
+ */
 const MEASURED = {
   cosine: {
     correct: {
-      customsFees: 0.184, //  "will I be charged extra fees at the border?"
-      shipsToUk: 0.31, //     "do you post to Britain?"
-      refundOpened: 0.31, //  "can I get my money back if I opened the packet?"
-      wearTime: 0.384, //     "how long do they stay on before falling off?"
-      safeRemoval: 0.59, //   "what's the safest way to take them off?"
+      refundOpened: 0.268, //  "can I get my money back if I opened the packet?"
+      sizeChoosing: 0.33, //   "how do I work out which set fits me?"
+      damagedItem: 0.347, //   "what happens if my set turns up broken?"
+      betweenSizes: 0.394, //  "should I go bigger or smaller if I'm between sizes?"
+      intlReturns: 0.402, //   "I'm outside the US — who pays to send them back?"
+      sizeChart: 0.54, //      "my middle nail measures about 12mm?"
     },
-    offTopicBest: 0.174, //   "do you accept bitcoin?"
+    offTopicBest: 0.174, //    "do you accept bitcoin?"
   },
   rerank: {
     correct: {
-      customsFees: 0.053, //  the hard one — vocabulary genuinely diverges
-      refundOpened: 0.207,
-      shipsToUk: 0.235,
-      wearTime: 0.419,
-      safeRemoval: 0.738,
+      damagedItem: 0.094, //   the hard one — vocabulary genuinely diverges
+      refundOpened: 0.198,
+      betweenSizes: 0.264,
+      sizeChoosing: 0.281,
+      sizeChart: 0.424,
+      intlReturns: 0.437,
     },
-    offTopicBest: 0.039,
+    offTopicBest: 0.048,
+  },
+  /**
+   * ⚠️ THE NUMBERS THAT PROVE A FLOOR CANNOT SOLVE THIS.
+   *
+   * Ordinary questions with NO supporting document, scored against the corpus
+   * that does exist. These are not off-topic — the return policy genuinely
+   * discusses time windows and international postage — they are simply not
+   * answered by it.
+   */
+  unanswerable: {
+    wearTime: 0.043, //     "how long do they stay on?"        -> below the floor, abstains
+    safeRemoval: 0.02, //   "safest way to take them off?"     -> below the floor, abstains
+    shipsToUk: 0.086, //    "do you ship to the UK?"           -> ABOVE the floor
+    deliveryTime: 0.229, // "how long does delivery take?"     -> ABOVE most correct answers
   },
 } as const;
 
@@ -71,21 +98,27 @@ describe("calibration — raw cosine", () => {
     }
   });
 
-  it("cannot separate off-topic from correct", () => {
-    // THE HONEST FINDING, asserted rather than papered over.
+  it("separates better on the real corpus than it did on the fixtures — but is still not the gate", () => {
+    // THE FINDING CHANGED, and saying so is the point of re-measuring.
     //
-    // Off-topic tops out at 0.174; the weakest correct answer is 0.184. Any
-    // threshold rejecting the first very nearly rejects the second. Rather than
-    // fit a number to a 0.01 window — which would pass this test and fail in
-    // production — we assert what is true: raw cosine grounds both.
-    const offTopic = applyRetrievalPolicy([scored("bitcoin", MEASURED.cosine.offTopicBest)]);
-    const weakestCorrect = applyRetrievalPolicy([
-      scored("customs", MEASURED.cosine.correct.customsFees),
-    ]);
+    // On the invented fixtures the weakest correct answer (0.184) sat BELOW the
+    // best off-topic score (0.174 → 0.98x): raw cosine could not separate them
+    // at all. On the real corpus the gap is 0.094 (1.54x), which is real.
+    //
+    // The floor still is not raised to exploit it. Cosine is the recall net —
+    // it decides what the cross-encoder is even allowed to look at, and a
+    // candidate discarded here can never be recovered. 7 chunks is also a very
+    // small corpus for trusting a cosine gap. Precision stays the reranker's job.
+    const gap = MEASURED.cosine.correct.refundOpened - MEASURED.cosine.offTopicBest;
+    expect(gap).toBeGreaterThan(0.05);
 
-    expect(offTopic.kind).toBe("grounded");
-    expect(weakestCorrect.kind).toBe("grounded");
-    expect(MEASURED.cosine.correct.customsFees - MEASURED.cosine.offTopicBest).toBeLessThan(0.02);
+    // Both still ground, because cosineFloor is deliberately a garbage filter.
+    expect(applyRetrievalPolicy([scored("bitcoin", MEASURED.cosine.offTopicBest)]).kind).toBe(
+      "grounded",
+    );
+    expect(
+      applyRetrievalPolicy([scored("refund", MEASURED.cosine.correct.refundOpened)]).kind,
+    ).toBe("grounded");
   });
 });
 
@@ -111,15 +144,61 @@ describe("calibration — cross-encoder rerank", () => {
 
   it("separates the typical case comfortably and the hard case narrowly", () => {
     // Worth encoding because the headline "reranking fixes it" is too simple.
-    // Four of five correct answers sit 5x+ above the off-topic ceiling. One —
-    // where the question's vocabulary genuinely diverges from the source text —
-    // sits at 1.36x. The floor is fitted to that hard case, which is why it is
-    // provisional and why the model's grounding instruction is a second layer.
+    // Most correct answers sit 4x+ above the off-topic ceiling. One — where the
+    // question's vocabulary genuinely diverges from the source text — sits under
+    // 2x. The floor is fitted to that hard case, which is why the model's
+    // grounding instruction is a necessary second layer.
     const { correct, offTopicBest } = MEASURED.rerank;
 
-    expect(correct.refundOpened / offTopicBest).toBeGreaterThan(5);
-    expect(correct.customsFees / offTopicBest).toBeLessThan(1.5);
-    expect(correct.customsFees / offTopicBest).toBeGreaterThan(1);
+    expect(correct.intlReturns / offTopicBest).toBeGreaterThan(4);
+    expect(correct.damagedItem / offTopicBest).toBeLessThan(2.5);
+    expect(correct.damagedItem / offTopicBest).toBeGreaterThan(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The limit of the whole mechanism
+// ---------------------------------------------------------------------------
+
+describe("what a relevance floor structurally cannot do", () => {
+  it("abstains on questions whose topic is genuinely absent", () => {
+    // Wear time and removal have nothing close in the corpus, so the floor
+    // works exactly as designed.
+    for (const score of [MEASURED.unanswerable.wearTime, MEASURED.unanswerable.safeRemoval]) {
+      expect(didAbstain(applyRetrievalPolicy([scored("x", 0.5, score)]))).toBe(true);
+    }
+  });
+
+  it("CANNOT abstain on an adjacent question the corpus does not answer", () => {
+    // THE FINDING, asserted rather than hoped away.
+    //
+    // "How long does delivery take?" scores 0.229 against the RETURN POLICY —
+    // higher than three of the six genuinely-correct answers, including
+    // "can I get my money back if I opened the packet?" at 0.198.
+    //
+    // The reranker is not wrong. The return policy really does discuss time
+    // windows and international postage; it is a strong topical match that
+    // happens not to answer the question.
+    const outcome = applyRetrievalPolicy([scored("x", 0.5, MEASURED.unanswerable.deliveryTime)]);
+
+    expect(outcome.kind).toBe("grounded");
+    expect(MEASURED.unanswerable.deliveryTime).toBeGreaterThan(MEASURED.rerank.correct.refundOpened);
+  });
+
+  it("has no threshold that admits the correct answers and rejects the adjacent ones", () => {
+    // The proof that this is not a tuning problem. Any floor high enough to
+    // reject the delivery question also rejects most of what the bot can
+    // legitimately answer, so the fix is a shipping policy — not a number.
+    const { correct } = MEASURED.rerank;
+    const rejected = Object.values(correct).filter(
+      (score) => score <= MEASURED.unanswerable.deliveryTime,
+    );
+
+    // Two of six: "what happens if my set turns up broken?" (0.094) and
+    // "can I get my money back if I opened the packet?" (0.198). Losing the
+    // ability to answer either, in exchange for declining one delivery
+    // question, is not a trade worth making.
+    expect(rejected.length).toBe(2);
   });
 });
 
@@ -192,11 +271,11 @@ describe("separate floors for separate score distributions", () => {
     // scale's threshold to the other is exactly the mistake that made both
     // earlier hand-picked defaults wrong.
     //
-    // Note the floors are NOT ordered — rerankFloor (0.045) is numerically
+    // Note the floors are NOT ordered — rerankFloor (0.071) is numerically
     // LOWER than cosineFloor (0.10). Neither is "stricter"; they are simply
     // measurements of different things.
-    const asRerank = applyRetrievalPolicy([scored("a", 0.5, 0.06)]);
-    const asCosine = applyRetrievalPolicy([scored("a", 0.06)]);
+    const asRerank = applyRetrievalPolicy([scored("a", 0.5, 0.09)]);
+    const asCosine = applyRetrievalPolicy([scored("a", 0.09)]);
 
     expect(asRerank.kind).toBe("grounded");
     expect(asCosine.kind).toBe("insufficient");

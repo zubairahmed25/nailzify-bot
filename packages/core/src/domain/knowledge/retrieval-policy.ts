@@ -127,9 +127,61 @@ export interface RetrievalPolicy {
  * different models are not comparable, so a floor carried across is a number
  * with no meaning.
  */
+/**
+ * Measured against the REAL corpus (return-policy + size-guide, 7 chunks) with
+ * scripts/verify-retrieval.ts. Re-run it after any change to the embedding
+ * model, the rerank model, the chunking policy, or the documents themselves —
+ * scores from different models are not comparable.
+ *
+ *                    worst correct   best off-topic   separation
+ *   cosine                   0.268            0.174        1.54x
+ *   rerank                   0.094            0.048        1.96x
+ *
+ * The earlier value of 0.045 came from a calibration run over three INVENTED
+ * documents — a shipping policy and a nail care guide the store does not have.
+ * 0.071 is the midpoint of the real gap.
+ *
+ * ============================================================================
+ * ⚠️ WHAT THIS FLOOR CANNOT DO, AND WHY THAT IS NOT FIXABLE HERE
+ * ============================================================================
+ *
+ * A floor separates ON-TOPIC from OFF-TOPIC. It cannot separate "this document
+ * answers the question" from "this document is about a related subject".
+ *
+ * Measured, same run. The store has no shipping policy, so these are unanswerable:
+ *
+ *   "how long does delivery take?"   ->  return-policy    rerank 0.229
+ *   "do you ship to the UK?"         ->  return-policy    rerank 0.086
+ *
+ * 0.229 is HIGHER than two of the six genuinely-correct answers, including
+ * "can I get my money back if I opened the packet?" at 0.198. The reranker is
+ * not malfunctioning: the return policy really does discuss time windows and
+ * international postage, so it is a strong topical match. It simply does not
+ * answer the question.
+ *
+ * There is therefore NO threshold that admits the correct answers and rejects
+ * these. Raise the floor above 0.229 and the bot abstains on most of the
+ * questions it can actually answer.
+ *
+ * The two real defences, in order:
+ *   1. WRITE THE DOCUMENT. A shipping policy makes the question answerable, and
+ *      is the only fix that turns "I don't know" into a sale.
+ *   2. The system prompt. The model sees the retrieved chunk and must say it
+ *      does not know when the chunk is merely adjacent. That is a judgement the
+ *      floor cannot make, because the floor never sees the question and the text
+ *      together — only a number.
+ *
+ * Retrieval scoring is a filter, not a comprehension check. Treating a high
+ * rerank score as "this answers the question" is the mistake this note exists
+ * to prevent.
+ */
 export const DEFAULT_RETRIEVAL_POLICY: RetrievalPolicy = {
+  // Garbage filter only. Best off-topic cosine measured 0.174 against a worst
+  // correct of 0.268, so cosine alone cannot gate precision — that is the
+  // reranker's job. Kept low deliberately: raising it discards candidates before
+  // the cross-encoder ever sees them.
   cosineFloor: 0.1,
-  rerankFloor: 0.045,
+  rerankFloor: 0.071,
   maxChunks: 4,
   topResultMargin: 0.005,
 };
