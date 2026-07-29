@@ -24,6 +24,7 @@ import { TOOL_NAMES } from "../prompts/tools.js";
 
 const attrs: ProductAttributes = {
   kind: "nail-set",
+  tags: [],
   shape: "almond",
   length: "short",
   finishes: ["matte"],
@@ -467,6 +468,7 @@ describe("what the model is told about a product", () => {
       title: "Semi-Solid Glue (No UV light needed)",
       attributes: {
         kind: "accessory",
+        tags: [],
         shape: null,
         length: null,
         finishes: [],
@@ -490,6 +492,7 @@ describe("what the model is told about a product", () => {
     const bare = product({
       attributes: {
         kind: "nail-set",
+        tags: [],
         shape: null,
         length: null,
         finishes: [],

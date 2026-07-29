@@ -16,6 +16,7 @@ import { recommendSetSize, selectRecommendations } from "./recommendation.js";
 
 const baseAttributes: ProductAttributes = {
   kind: "nail-set",
+  tags: [],
   shape: "almond",
   length: "short",
   finishes: ["matte"],

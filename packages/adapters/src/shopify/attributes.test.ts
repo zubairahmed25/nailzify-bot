@@ -4,7 +4,7 @@ import { parseMetafields, type RawMetafields } from "./attributes.js";
 
 const parse = (raw: Partial<RawMetafields>) =>
   parseMetafields(
-    { shape: null, style: null, colours: [], finishes: [], ...raw },
+    { shape: null, style: null, colours: [], finishes: [], tags: [], ...raw },
     "Test Product",
   );
 
@@ -241,5 +241,64 @@ describe("productEmbeddingText", () => {
     // fact that can change without the document changing.
     expect(text).not.toMatch(/\$|price|USD|\d+\.\d{2}/i);
     expect(text).not.toMatch(/stock|inventory|available|quantity/i);
+  });
+});
+
+describe("tags carry what no metafield does", () => {
+  it("promotes a Bridal tag into a real occasion", () => {
+    // THE FIX. Occasion was fabricated as "everyday" for every nail set because
+    // nothing in the store recorded it, so "nails for a wedding" could not filter.
+    const { attributes } = parse({ shape: "Almond", tags: ["Bridal"] });
+
+    expect(attributes.occasions).toEqual(["bridal"]);
+  });
+
+  it("accepts the words a merchandiser actually types", () => {
+    expect(parse({ shape: "Almond", tags: ["Wedding"] }).attributes.occasions).toEqual(["bridal"]);
+    expect(parse({ shape: "Almond", tags: ["NYE"] }).attributes.occasions).toEqual(["party"]);
+    expect(parse({ shape: "Almond", tags: ["Office"] }).attributes.occasions).toEqual([
+      "professional",
+    ]);
+  });
+
+  it("keeps a non-occasion tag as free text instead of forcing it into the enum", () => {
+    // "Summer" is a season, not an occasion. Mapping it onto `holiday` because
+    // both feel seasonal would invent a claim the merchandiser never made — and
+    // the model states these to customers as fact.
+    const { attributes } = parse({ shape: "Almond", tags: ["Summer", "Bestseller"] });
+
+    expect(attributes.tags).toEqual(["Summer", "Bestseller"]);
+    expect(attributes.occasions).toEqual(["everyday"]);
+  });
+
+  it("falls back to the honest default when no tag is an occasion", () => {
+    expect(parse({ shape: "Almond", tags: ["Bestseller"] }).attributes.occasions).toEqual([
+      "everyday",
+    ]);
+  });
+
+  it("collects several occasions without duplicating", () => {
+    const { attributes } = parse({ shape: "Almond", tags: ["Bridal", "Wedding", "Party"] });
+
+    expect(attributes.occasions).toEqual(["bridal", "party"]);
+  });
+
+  it("still gives an accessory no occasion, however it is tagged", () => {
+    // A nail file tagged "Bridal" is still a nail file.
+    expect(parse({ tags: ["Bridal"] }).attributes.occasions).toEqual([]);
+  });
+
+  it("puts tags in the embedded text so search can reach them", () => {
+    const attributes = parse({ shape: "Almond", tags: ["Summer", "Bridal"] }).attributes;
+    const text = productEmbeddingText({
+      title: "Azure",
+      description: "",
+      productType: "",
+      attributes,
+    });
+
+    // Without this a customer searching "summer nails" cannot reach a product
+    // tagged Summer — no metafield covers seasons.
+    expect(text).toContain("Summer");
   });
 });

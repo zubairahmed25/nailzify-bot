@@ -57,6 +57,10 @@ export function productEmbeddingText(input: {
     a.style ? `Style: ${a.style}` : "",
     colours.length > 0 ? `Colours: ${colours.join(", ")}` : "",
     patterns.length > 0 ? `Pattern: ${patterns.join(", ")}` : "",
+    // The whole point of tags: "Summer" and "Snowflake" are not shapes, finishes
+    // or colours, and no metafield covers them. Without this line a customer
+    // searching "summer nails" cannot reach a product tagged Summer.
+    a.tags.length > 0 ? `Tags: ${a.tags.join(", ")}` : "",
   ]
     .filter((line) => line.length > 0)
     .join("\n");

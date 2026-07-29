@@ -13,6 +13,7 @@ function readerFor(m: Record<string, unknown>) {
 
 const full: ProductAttributes = {
   kind: "nail-set",
+  tags: [],
   shape: "almond",
   length: "short",
   finishes: ["matte", "metallic"],
@@ -41,6 +42,7 @@ describe("vector metadata round-trip", () => {
     // The common live case: 5 of 40 products have no shape at all.
     const empty: ProductAttributes = {
       kind: "nail-set",
+      tags: [],
       shape: null,
       length: null,
       finishes: [],

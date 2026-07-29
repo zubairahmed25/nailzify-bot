@@ -211,7 +211,7 @@ function toProduct(
   storefrontDomain: string,
   warn: (warning: string) => void,
 ): Product {
-  const { attributes, warnings } = parseMetafields(toRawMetafields(raw.metafields), raw.title);
+  const { attributes, warnings } = parseMetafields(toRawMetafields(raw.metafields, raw.tags), raw.title);
   for (const warning of warnings) warn(warning);
 
   const variants: ProductVariant[] = raw.variants.nodes.map((v) => ({
@@ -248,7 +248,10 @@ function toProduct(
  * positionally aligned with the identifiers we sent, but relying on that makes
  * reordering the query a silent data-corruption bug rather than a compile error.
  */
-function toRawMetafields(metafields: readonly (RawMetafield | null)[] | undefined): RawMetafields {
+function toRawMetafields(
+  metafields: readonly (RawMetafield | null)[] | undefined,
+  tags: readonly string[],
+): RawMetafields {
   // Tolerate the field being absent, not just its entries being null. Throwing
   // here would fail the whole hydration batch, and the tool registry reports a
   // failed batch to the customer as "we don't sell that" — a missing metafield
@@ -268,6 +271,7 @@ function toRawMetafields(metafields: readonly (RawMetafield | null)[] | undefine
     style: find("custom", "nail_type")?.value?.trim() || null,
     colours: labels(find("shopify", "color-pattern")),
     finishes: labels(find("shopify", "finish")),
+    tags: tags ?? [],
   };
 }
 

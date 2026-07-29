@@ -7,6 +7,7 @@ import { EmptyCatalogError, ingestProducts } from "./ingest-products.js";
 
 const attrs = (over: Partial<ProductAttributes> = {}): ProductAttributes => ({
   kind: "nail-set",
+  tags: [],
   shape: "almond",
   length: "short",
   finishes: ["matte"],
@@ -213,6 +214,7 @@ describe("what the vectors describe", () => {
           title: "Semi-Solid Glue",
           attributes: attrs({
             kind: "accessory",
+            tags: [],
             shape: null,
             length: null,
             finishes: [],

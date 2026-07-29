@@ -48,6 +48,16 @@ export interface RawMetafields {
   readonly colours: readonly string[];
   /** `shopify.finish`, resolved to labels — e.g. ["Gloss"]. */
   readonly finishes: readonly string[];
+  /**
+   * Ordinary Shopify tags — "Bridal", "Summer", "Bestseller".
+   *
+   * ⚠️ TAGS ARE BACK, FOR A DIFFERENT JOB. The first version of this parser read
+   * shape and finish from namespaced tags, which was simply wrong: that data
+   * lives in metafields. Tags carry what no metafield covers — seasons, themes,
+   * and OCCASION, which until now was fabricated as "everyday" for every single
+   * product because nothing in the store recorded it.
+   */
+  readonly tags: readonly string[];
 }
 
 export interface ParsedAttributes {
@@ -84,6 +94,34 @@ const LENGTHS: Record<string, NailLength> = {
   long: "long",
 };
 
+/**
+ * Tags that genuinely denote an occasion.
+ *
+ * Deliberately small. A tag that is not clearly an occasion stays free text and
+ * reaches search through the embedding instead — mapping "Summer" onto `holiday`
+ * because both feel seasonal would invent a claim the merchandiser never made,
+ * and the model states these to customers as fact.
+ */
+const OCCASION_TAGS: Record<string, Occasion> = {
+  bridal: "bridal",
+  wedding: "bridal",
+  bride: "bridal",
+  party: "party",
+  "night out": "party",
+  nye: "party",
+  "new year": "party",
+  work: "professional",
+  office: "professional",
+  professional: "professional",
+  holiday: "holiday",
+  christmas: "holiday",
+  halloween: "holiday",
+  festive: "holiday",
+  everyday: "everyday",
+  casual: "everyday",
+  daily: "everyday",
+};
+
 
 /**
  * Classify a product as a nail set or an accessory.
@@ -113,6 +151,15 @@ function classify(raw: RawMetafields): ProductKind {
 export function parseMetafields(raw: RawMetafields, productTitle: string): ParsedAttributes {
   const warnings: string[] = [];
   const kind = classify(raw);
+
+  // ---- tags and the occasions hiding in them --------------------------------
+  const tags = raw.tags.map((t) => t.trim()).filter(Boolean);
+
+  const taggedOccasions: Occasion[] = [];
+  for (const tag of tags) {
+    const occasion = OCCASION_TAGS[tag.toLowerCase()];
+    if (occasion && !taggedOccasions.includes(occasion)) taggedOccasions.push(occasion);
+  }
 
   // ---- shape, and the length hiding inside it ------------------------------
   //
@@ -179,22 +226,27 @@ export function parseMetafields(raw: RawMetafields, productTitle: string): Parse
       shape,
       length,
       finishes,
-      // Occasion is not stored anywhere on the store. For a nail set "everyday"
-      // is the only honest default: unlike a shape, it makes no specific claim a
-      // customer could be misled by, and it only affects which queries surface a
-      // product.
+      // REAL occasion data when the merchandiser tagged it; the honest default
+      // otherwise. "everyday" makes no specific claim a customer could be misled
+      // by — unlike a shape — and only affects which queries surface a product.
       //
-      // An ACCESSORY gets nothing. A glue has no occasion and no experience
-      // level, and handing it "everyday" let a nail file score points on "what's
-      // good for every day?" — a fabricated attribute doing exactly the damage
-      // fabricated attributes do.
-      occasions: kind === "nail-set" ? (["everyday"] as Occasion[]) : [],
+      // An ACCESSORY gets nothing regardless. A glue has no occasion, and
+      // handing it "everyday" let a nail file score points on "what's good for
+      // every day?" — a fabricated attribute doing exactly the damage fabricated
+      // attributes do.
+      occasions:
+        kind !== "nail-set"
+          ? []
+          : taggedOccasions.length > 0
+            ? taggedOccasions
+            : (["everyday"] as Occasion[]),
       // Deliberately permissive. Claiming a set is beginner-friendly when it is
       // not produces a bad first experience and a return.
       suitableFor:
         kind === "nail-set" ? (["comfortable", "experienced"] as ExperienceLevel[]) : [],
       colourNotes,
       style,
+      tags,
     },
     warnings,
   };

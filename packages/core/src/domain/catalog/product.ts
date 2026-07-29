@@ -124,6 +124,19 @@ export interface ProductAttributes {
   /** From `shopify.color-pattern`, e.g. ["Pink"], ["Floral"]. */
   readonly colourNotes: readonly string[];
   /**
+   * Merchandising tags, verbatim from Shopify.
+   *
+   * ⚠️ NOT a second home for shape/length/finish — those live in metafields and
+   * an earlier version of this codebase got that wrong. Tags carry what no
+   * metafield covers: seasons ("Summer"), themes ("Snowflake"), and occasions.
+   *
+   * Kept as free text because a merchandiser invents tags faster than anyone
+   * updates an enum, and the embedding handles arbitrary words. Recognised
+   * occasion tags are ALSO promoted into `occasions` for structured filtering;
+   * everything else stays here and reaches search through the embedding.
+   */
+  readonly tags: readonly string[];
+  /**
    * Decorative style, from `custom.nail_type` — "Chrome", "French", "Cat-eye".
    *
    * DELIBERATELY FREE TEXT, not an enum. The real catalogue has 18 values with
@@ -309,6 +322,7 @@ export function productVectorMetadata(input: {
     ...(a.finishes.length > 0 ? { finishes: [...a.finishes] } : {}),
     ...(a.style ? { style: a.style } : {}),
     occasions: [...a.occasions],
+    ...(a.tags.length > 0 ? { tags: [...a.tags] } : {}),
     suitableFor: [...a.suitableFor],
     colourNotes: [...a.colourNotes],
   };
@@ -337,5 +351,6 @@ export function productAttributesFromMetadata(read: {
     occasions: read.strArray("occasions") as Occasion[],
     suitableFor: read.strArray("suitableFor") as ExperienceLevel[],
     colourNotes: read.strArray("colourNotes"),
+    tags: read.strArray("tags"),
   };
 }
