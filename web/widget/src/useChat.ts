@@ -122,6 +122,19 @@ export function useChat() {
             break;
 
           case "tool_started":
+            // ⚠️ A TOOL CALL IS A PARAGRAPH BOUNDARY, and forgetting that produced
+            // the first bug a real customer would have hit:
+            //
+            //   "Let me look up the sizing guide for you.According to the..."
+            //
+            // The model speaks, calls a tool, then speaks again. Those are two
+            // separate utterances arriving as two token streams, and appending
+            // them to one buffer runs the last word of the first into the first
+            // word of the second — no space, no break, one wall of text.
+            if (accumulated.length > 0 && !accumulated.endsWith("\n\n")) {
+              accumulated += "\n\n";
+              updateReply({ text: accumulated });
+            }
             // Shown so a multi-second search does not look like a hang. The
             // wording is deliberately about the store, not about the machinery.
             setToolActivity(

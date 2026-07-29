@@ -37,7 +37,15 @@ export type Inline =
 
 export type Block =
   | { readonly kind: "paragraph"; readonly spans: readonly Inline[] }
-  | { readonly kind: "list"; readonly items: readonly (readonly Inline[])[] };
+  | { readonly kind: "list"; readonly items: readonly (readonly Inline[])[] }
+  /**
+   * A real table, because the size chart IS one.
+   *
+   * Without this, "| Set size | Thumb | Index |" renders as literal pipes and
+   * dashes — the single most important piece of content this bot serves,
+   * displayed as junk. Worth the ~400 bytes.
+   */
+  | { readonly kind: "table"; readonly header: readonly string[]; readonly rows: readonly (readonly string[])[] };
 
 /**
  * Only https, and only as an absolute URL.
@@ -89,6 +97,14 @@ function parseInline(text: string): readonly Inline[] {
   return spans;
 }
 
+/** `| a | b |` -> ["a","b"]. Leading/trailing pipes are optional in the wild. */
+const splitRow = (line: string): string[] =>
+  line.replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
+
+/** The `|---|:--:|` line that turns the row above it into a header. */
+const isDivider = (line: string): boolean =>
+  /^\|?[\s:|-]+\|[\s:|-]*$/.test(line) && line.includes("-");
+
 export function parseMarkdown(source: string): readonly Block[] {
   const blocks: Block[] = [];
   let listBuffer: (readonly Inline[])[] = [];
@@ -101,11 +117,35 @@ export function parseMarkdown(source: string): readonly Block[] {
   };
 
   // Blank-line separated, so a streaming half-paragraph still renders.
-  for (const rawLine of source.split("\n")) {
-    const line = rawLine.trim();
+  const lines = source.split("\n");
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!.trim();
 
     if (line.length === 0) {
       flushList();
+      continue;
+    }
+
+    // ---- table ------------------------------------------------------------
+    // Requires the divider line to be present. Mid-stream, a header row arrives
+    // before its divider — treating it as a table then would render a one-row
+    // table that reflows a moment later. Waiting means it briefly shows as text
+    // and then snaps into a table, which is the calmer of the two.
+    if (line.startsWith("|") && isDivider(lines[i + 1]?.trim() ?? "")) {
+      flushList();
+      const header = splitRow(line);
+      const rows: string[][] = [];
+
+      let j = i + 2;
+      for (; j < lines.length; j += 1) {
+        const row = lines[j]!.trim();
+        if (!row.startsWith("|")) break;
+        rows.push(splitRow(row));
+      }
+
+      blocks.push({ kind: "table", header, rows });
+      i = j - 1;
       continue;
     }
 

@@ -86,10 +86,25 @@
 
 @media (max-width: 480px) {
   .nz-panel {
-    right: 0; bottom: 0; left: 0;
+    right: 0; left: 0;
     width: 100%; max-width: 100%;
-    height: 100dvh; max-height: 100dvh;
     border-radius: 0; border: none;
+
+    /*
+     * ⚠️ dvh IS NOT ENOUGH WHEN THE KEYBOARD OPENS.
+     *
+     * `100dvh` tracks browser chrome appearing and disappearing on scroll. It
+     * does NOT track the on-screen keyboard: iOS Safari leaves the layout
+     * viewport at full height and simply scrolls it, so the panel keeps its
+     * full-screen height while the bottom half sits behind the keyboard — the
+     * composer is hidden and a large dead gap appears above it.
+     *
+     * `--nz-vh` is set from window.visualViewport, which DOES shrink when the
+     * keyboard appears. The dvh value is the fallback for browsers without it.
+     */
+    bottom: 0;
+    height: var(--nz-vh, 100dvh);
+    max-height: var(--nz-vh, 100dvh);
   }
 }
 
@@ -155,6 +170,33 @@
 }
 .nz-card__price { font-size: 13px; color: var(--nz-muted); }
 .nz-card__sold { color: #d97070; }
+
+/*
+ * Tables. The size chart is six columns inside a 380px panel, so it scrolls
+ * horizontally INSIDE the bubble rather than widening the widget.
+ */
+.nz-tablewrap {
+  overflow-x: auto;
+  margin: 0 0 8px;
+  -webkit-overflow-scrolling: touch;
+}
+.nz-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.nz-table th,
+.nz-table td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--nz-border);
+}
+.nz-table th {
+  font-weight: 600;
+  border-bottom: 2px solid var(--nz-border);
+}
+/* The first column is the label a customer scans down — keep it legible. */
+.nz-table td:first-child { font-weight: 600; }
 
 .nz-status { font-size: 12px; color: var(--nz-muted); min-height: 16px; padding-left: 2px; }
 

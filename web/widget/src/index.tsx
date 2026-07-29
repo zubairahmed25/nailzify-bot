@@ -90,9 +90,36 @@ function mount(): void {
     shadow.appendChild(style);
   }
 
+  trackVisualViewport(host);
+
   const root = document.createElement("div");
   shadow.appendChild(root);
   render(<App />, root);
+}
+
+/**
+ * Publish the visual viewport height as `--nz-vh` on the host.
+ *
+ * The on-screen keyboard does not change the layout viewport on iOS Safari — it
+ * overlays it and scrolls. So `100dvh` keeps the panel full-screen with its
+ * lower half behind the keyboard: the composer disappears and a dead gap opens
+ * above it. `visualViewport.height` is the only measurement that shrinks.
+ *
+ * Set on the HOST rather than inside the shadow root so a single custom property
+ * reaches the panel through inheritance, which crosses the shadow boundary while
+ * ordinary styles do not.
+ */
+function trackVisualViewport(host: HTMLElement): void {
+  const vv = window.visualViewport;
+  if (!vv) return;
+
+  const apply = () => host.style.setProperty("--nz-vh", `${vv.height}px`);
+  apply();
+
+  // `scroll` matters as well as `resize`: iOS shifts the visual viewport when
+  // the keyboard opens without always firing a resize.
+  vv.addEventListener("resize", apply);
+  vv.addEventListener("scroll", apply);
 }
 
 // `document.body` may not exist yet if the theme loads scripts in <head>.

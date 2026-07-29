@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { parseMarkdown, type Block, type Inline } from "./markdown.js";
 
 const spans = (blocks: readonly Block[]): readonly Inline[] =>
-  blocks.flatMap((b) => (b.kind === "paragraph" ? b.spans : b.items.flat()));
+  blocks.flatMap((b) =>
+    b.kind === "paragraph" ? b.spans : b.kind === "list" ? b.items.flat() : [],
+  );
 
 const kinds = (source: string) => spans(parseMarkdown(source)).map((s) => s.kind);
 const text = (source: string) =>
@@ -108,5 +110,52 @@ describe("formatting", () => {
 
   it("preserves text around inline markers", () => {
     expect(text("Sets cost **$13.99** each.")).toBe("Sets cost $13.99 each.");
+  });
+});
+
+describe("tables", () => {
+  const CHART = [
+    "| Set size | Thumb | Index |",
+    "| -------- | ----- | ----- |",
+    "| XS       | 14    | 10    |",
+    "| S        | 15    | 11    |",
+  ].join("\n");
+
+  it("parses the size chart as a real table", () => {
+    // The single most important piece of content this bot serves. Without table
+    // support it rendered as literal pipes and dashes.
+    const [block] = parseMarkdown(CHART);
+
+    expect(block?.kind).toBe("table");
+    if (block?.kind === "table") {
+      expect(block.header).toEqual(["Set size", "Thumb", "Index"]);
+      expect(block.rows).toEqual([
+        ["XS", "14", "10"],
+        ["S", "15", "11"],
+      ]);
+    }
+  });
+
+  it("requires the divider, so a half-streamed table is not a table yet", () => {
+    // Mid-stream the header row arrives before its divider. Treating it as a
+    // table then renders a one-row table that reflows a moment later; showing
+    // it briefly as text and snapping into place is calmer.
+    const [block] = parseMarkdown("| Set size | Thumb |");
+    expect(block?.kind).toBe("paragraph");
+  });
+
+  it("keeps prose around a table separate", () => {
+    const blocks = parseMarkdown(`Here is the chart:\n\n${CHART}\n\nSize up if unsure.`);
+
+    expect(blocks.map((b) => b.kind)).toEqual(["paragraph", "table", "paragraph"]);
+  });
+
+  it("tolerates rows without leading and trailing pipes", () => {
+    const blocks = parseMarkdown("| a | b |\n| - | - |\na | b");
+    const [block] = blocks;
+    if (block?.kind === "table") expect(block.rows).toEqual([]);
+    // The unpiped row is not treated as part of the table — it becomes prose,
+    // which is wrong-ish but safe. Asserted so the behaviour is known, not lucky.
+    expect(blocks.some((b) => b.kind === "paragraph")).toBe(true);
   });
 });

@@ -48,25 +48,57 @@ export function Message({ message }: { message: ChatMessage }) {
         {isCustomer ? (
           <p>{message.text}</p>
         ) : (
-          blocks!.map((block, i) =>
-            block.kind === "list" ? (
-              <ul key={i}>
-                {block.items.map((item, j) => (
-                  <li key={j}>
-                    {item.map((span, k) => (
-                      <Span key={k} span={span} />
-                    ))}
-                  </li>
-                ))}
-              </ul>
-            ) : (
+          blocks!.map((block, i) => {
+            if (block.kind === "list") {
+              return (
+                <ul key={i}>
+                  {block.items.map((item, j) => (
+                    <li key={j}>
+                      {item.map((span, k) => (
+                        <Span key={k} span={span} />
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              );
+            }
+
+            if (block.kind === "table") {
+              // Wrapped so a wide chart scrolls INSIDE the bubble. The panel is
+              // 380px and the size chart has six columns; without this the
+              // table forces the whole widget wider than the viewport.
+              return (
+                <div class="nz-tablewrap" key={i}>
+                  <table class="nz-table">
+                    <thead>
+                      <tr>
+                        {block.header.map((cell, j) => (
+                          <th key={j}>{cell}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {block.rows.map((row, j) => (
+                        <tr key={j}>
+                          {row.map((cell, k) => (
+                            <td key={k}>{cell}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            }
+
+            return (
               <p key={i}>
                 {block.spans.map((span, k) => (
                   <Span key={k} span={span} />
                 ))}
               </p>
-            ),
-          )
+            );
+          })
         )}
       </div>
 
