@@ -102,6 +102,23 @@ export class ApiStack extends cdk.Stack {
       },
 
       environment: {
+        /**
+         * Bump to force CloudFormation to rewrite the ENTIRE environment block.
+         *
+         * ⚠️ WHY THIS EXISTS. `aws lambda update-function-configuration
+         * --environment` REPLACES every variable rather than merging, so one
+         * command run to force a cold start wiped all ten of these and left the
+         * function returning 503 "Service is not configured".
+         *
+         * Redeploying did not fix it. CloudFormation diffs its template against
+         * the LAST DEPLOYED TEMPLATE, not against reality — the environment
+         * block was unchanged in the template, so it was left alone and the
+         * drift persisted. Changing any value in the block forces a full
+         * rewrite, which also removes anything added out of band.
+         *
+         * To correct drift like this again: bump this number and deploy.
+         */
+        CONFIG_REVISION: "2",
         NODE_OPTIONS: "--enable-source-maps",
         NAILZIFY_ENV: envName,
         TABLE_NAME: props.table.tableName,
@@ -157,10 +174,36 @@ export class ApiStack extends cdk.Stack {
 
     // ---- Streaming Function URL ------------------------------------------
     const functionUrl = chatFn.addFunctionUrl({
-      // ⚠️ NOT `NONE`. With AWS_IAM only CloudFront (via OAC) can invoke this.
-      // A public Function URL bypasses WAF entirely and lets anyone bill Bedrock
-      // directly — an open LLM endpoint on the internet.
-      authType: lambda.FunctionUrlAuthType.AWS_IAM,
+      // ⚠️ THIS WAS AWS_IAM + OAC, AND IT CANNOT WORK. Recorded because the
+      // reasoning that produced it is sound and still tempting.
+      //
+      // AWS_IAM plus CloudFront Origin Access Control is the correct way to keep
+      // a Function URL private — for GET traffic. For POST with a body, AWS's
+      // own documentation is explicit:
+      //
+      //   "If you use PUT or POST methods with your Lambda function URL, your
+      //    users must compute the SHA256 of the body and include the payload
+      //    hash in the x-amz-content-sha256 header. Lambda doesn't support
+      //    unsigned payloads."
+      //
+      // The "user" here is SHOPIFY'S APP PROXY, forwarding a customer's message.
+      // It will never attach an AWS-specific header. So every chat request died
+      // at the Function URL with a SigV4 mismatch, before reaching our code —
+      // observable only as a 403 that reads like a permissions problem.
+      //
+      // WHAT ACTUALLY GUARDS THIS ENDPOINT, and always did: the Shopify App
+      // Proxy HMAC, verified in handler.ts before any work happens. A request
+      // without a valid signature is rejected in about a millisecond and never
+      // reaches Bedrock. IAM was defence in depth on top of that, not the
+      // boundary itself.
+      //
+      // WHAT IS GENUINELY LOST: the Function URL is now reachable directly, so
+      // traffic that finds it bypasses the WAF below. That costs Lambda
+      // invocations under a flood — not Bedrock spend, since unsigned requests
+      // never get that far. Shopify's traffic still arrives through CloudFront
+      // and is still filtered. To close it completely, add a shared secret
+      // header on the CloudFront origin and require it in the handler.
+      authType: lambda.FunctionUrlAuthType.NONE,
       // ⚠️ THE CRITICAL LINE. Without RESPONSE_STREAM the body is buffered and
       // the customer waits ~4s for the whole answer instead of ~800ms for the
       // first token. API Gateway cannot do this at all.
@@ -226,7 +269,10 @@ export class ApiStack extends cdk.Stack {
 
       additionalBehaviors: {
         "/api/*": {
-          origin: origins.FunctionUrlOrigin.withOriginAccessControl(functionUrl),
+          // Plain origin, NOT withOriginAccessControl(). OAC signs the request
+          // with SigV4, which is precisely what the Function URL rejects for a
+          // POST body — see the authType note above.
+          origin: new origins.FunctionUrlOrigin(functionUrl),
           // ⚠️ Caching a chat response would serve one customer's answer to
           // another. Not hypothetical — just a misconfiguration.
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
