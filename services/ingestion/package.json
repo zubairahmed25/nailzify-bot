@@ -1,0 +1,13 @@
+{
+  "name": "@nailzify/ingestion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ingestion Lambda. Indexes documents from S3 and the Shopify catalogue into Pinecone.",
+  "main": "./src/handler.ts",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.717.0",
+    "@nailzify/adapters": "*",
+    "@nailzify/core": "*"
+  }
+}

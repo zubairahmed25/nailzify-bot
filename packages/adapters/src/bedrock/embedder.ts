@@ -24,6 +24,27 @@ import { LlmThrottled, LlmUnavailable } from "@nailzify/core";
 /** Cohere accepts at most 96 texts per call. Exceeding it is a hard API error. */
 const COHERE_MAX_BATCH = 96;
 
+/**
+ * The embedding model and dimension, defined ONCE for every caller.
+ *
+ * ⚠️ INGESTION AND QUERY MUST AGREE, EXACTLY. Vectors from different models are
+ * not comparable, and a dimension mismatch either fails every upsert or fails
+ * every query. Two composition roots each hardcoding "cohere.embed-v4:0" and
+ * 1024 is two chances to change one and forget the other, and the resulting bug
+ * is a bot that finds nothing with no obvious cause.
+ *
+ * ⚠️ CHANGING EITHER VALUE REQUIRES RE-EMBEDDING THE WHOLE CORPUS. Old vectors
+ * do not migrate; they become noise that still returns confident-looking scores.
+ * That is why each chunk records the model it was embedded with.
+ *
+ * The 1024 is PINNED, not defaulted: Cohere embed-v4 returns 1536 unless told
+ * otherwise, which the design doc originally got wrong.
+ */
+export const EMBEDDING_MODEL = {
+  modelId: "cohere.embed-v4:0",
+  dimensions: 1024,
+} as const;
+
 export interface BedrockEmbedderConfig {
   readonly region: string;
   readonly modelId: string;

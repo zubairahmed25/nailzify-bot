@@ -11,6 +11,10 @@
  */
 
 import {
+  createDynamoConversationRepo,
+  createSecretsManagerProvider,
+} from "@nailzify/adapters";
+import {
   handleRequest,
   type FunctionUrlEvent,
   type ResponseStream,
@@ -40,18 +44,50 @@ async function getContainer(): Promise<Container> {
   return container;
 }
 
+function required(name: string): string {
+  const value = process.env[name];
+  // Fail at cold start, naming the variable. handleRequest turns this into a 503
+  // without leaking configuration detail, and a container that never starts is
+  // far better than one that fails partway through a customer's conversation.
+  if (!value) throw new Error(`Missing required environment variable ${name}`);
+  return value;
+}
+
 async function loadConfig(): Promise<ContainerConfig> {
-  // Left unimplemented until the CDK stack exists — it needs the DynamoDB table
-  // name and the secret ARNs that stack creates, plus a DynamoDB implementation
-  // of ConversationRepository which is not written yet.
-  //
-  // Throwing loudly at cold start beats a half-configured container that fails
-  // partway through a customer's conversation. handleRequest turns this into a
-  // 503 without leaking any configuration detail.
-  throw new Error(
-    "loadConfig() is not implemented — wire Secrets Manager + the DynamoDB " +
-      "ConversationRepository once the CDK stack lands. See docs/09-deployment.md §9.7.",
-  );
+  const region = process.env["AWS_REGION"] ?? "us-east-1";
+  const secrets = createSecretsManagerProvider({ region });
+
+  // In parallel. Three sequential round trips would add ~90ms to every cold
+  // start for values that have nothing to do with each other.
+  const [proxySecret, storefrontToken, pineconeApiKey] = await Promise.all([
+    secrets.get(required("PROXY_SECRET_ARN")),
+    secrets.get(required("STOREFRONT_SECRET_ARN")),
+    secrets.get(required("PINECONE_SECRET_ARN")),
+  ]);
+
+  return {
+    region,
+    proxySecret,
+    storefrontToken,
+    pineconeApiKey,
+    pineconeIndex: required("PINECONE_INDEX"),
+    shopDomain: required("SHOP_DOMAIN"),
+    storefrontDomain: required("STOREFRONT_DOMAIN"),
+    shopifyApiVersion: required("SHOPIFY_API_VERSION"),
+    conversations: createDynamoConversationRepo({
+      tableName: required("TABLE_NAME"),
+      region,
+    }),
+    models: {
+      chat: required("CHAT_MODEL_ID"),
+      fast: required("FAST_MODEL_ID"),
+      judge: required("FAST_MODEL_ID"),
+    },
+    onWarning: (message) =>
+      console.warn(JSON.stringify({ level: "WARN", msg: "merchandising", detail: message })),
+    onUsage: (usage) =>
+      console.log(JSON.stringify({ level: "INFO", msg: "bedrock.usage", ...usage })),
+  };
 }
 
 export const handler = awslambda.streamifyResponse(

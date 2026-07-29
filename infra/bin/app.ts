@@ -13,6 +13,7 @@ import { Aspects } from "aws-cdk-lib";
 import { AwsSolutionsChecks, NagSuppressions } from "cdk-nag";
 import { DataStack } from "../lib/data-stack.js";
 import { ApiStack } from "../lib/api-stack.js";
+import { IngestionStack } from "../lib/ingestion-stack.js";
 
 const app = new cdk.App();
 
@@ -61,6 +62,19 @@ const api = new ApiStack(app, `Nailzify-${envName}-Api`, {
   ...config,
 });
 
+const ingestion = new IngestionStack(app, `Nailzify-${envName}-Ingestion`, {
+  env,
+  envName,
+  table: data.table,
+  storefrontSecret: data.shopifyStorefrontSecret,
+  pineconeSecret: data.pineconeSecret,
+  shopDomain: config.shopDomain,
+  storefrontDomain: config.storefrontDomain,
+  pineconeIndex: config.pineconeIndex,
+  shopifyApiVersion: config.shopifyApiVersion,
+  embedModelId: config.embedModelId,
+});
+
 // No explicit dependency call. The API stack references the Data stack's table
 // and secrets, and CDK derives the ordering from those references. Declaring it
 // by hand was what turned an ordinary reference into a reported CYCLE once
@@ -78,6 +92,34 @@ cdk.Tags.of(app).add("Environment", envName);
 // ---------------------------------------------------------------------------
 
 Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));
+
+NagSuppressions.addStackSuppressions(ingestion, [
+  {
+    id: "AwsSolutions-L1",
+    reason: "Node 22 is the current LTS runtime for Lambda at time of writing.",
+  },
+  {
+    id: "AwsSolutions-IAM4",
+    reason:
+      "AWSLambdaBasicExecutionRole is the AWS-managed policy for CloudWatch Logs. " +
+      "Replacing it with an inline policy would reimplement it verbatim.",
+  },
+  {
+    id: "AwsSolutions-IAM5",
+    reason:
+      "The Bedrock embedding ARN wildcards REGION only; the model identifier is " +
+      "explicit and the action is InvokeModel alone. S3 read is scoped to the " +
+      "document bucket with a wildcard on object key, which is what reading any " +
+      "uploaded document requires.",
+  },
+  {
+    id: "AwsSolutions-S1",
+    reason:
+      "No server access logging on the document bucket. Object-level activity is " +
+      "already captured by the Lambda's own structured logs, and a second bucket " +
+      "to log reads of two policy documents is cost and surface for no signal.",
+  },
+]);
 
 NagSuppressions.addStackSuppressions(api, [
   {

@@ -13,7 +13,10 @@
       "Bash(python3 -)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(node -e \"const p=require\\('./package.json'\\);console.log\\(JSON.stringify\\({d:p.dependencies,dd:p.devDependencies},null,1\\)\\)\")",
+      "Bash(npx cdk *)",
+      "Bash(npm test *)"
     ]
   }
 }

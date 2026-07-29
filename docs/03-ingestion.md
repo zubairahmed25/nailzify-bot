@@ -395,3 +395,53 @@ never mix models in one namespace.
 ---
 
 Next: [Phase 4 — Retrieval pipeline](04-retrieval.md)
+
+---
+
+## Postscript: what was actually built
+
+This phase specified S3 → EventBridge → **Step Functions**, with a `Map` state at
+`MaxConcurrency: 5`. What shipped is S3 → **one Lambda**. The reason is worth recording,
+because "the doc said Step Functions" is not a good enough reason to build a state
+machine.
+
+Measured against the real corpus:
+
+| | count | embedding calls |
+| --- | --- | --- |
+| Documents | 2 (7 chunks) | 1 |
+| Products | 40 | 1 |
+
+The entire job is **two Bedrock calls** and finishes in seconds. Step Functions exists to
+solve fan-out across Bedrock TPM limits, retry orchestration across many independent
+units, and documents too large for a single Lambda. None of those conditions hold at two
+orders of magnitude below the threshold, and a state machine brings its own IAM, its own
+definition to keep in sync with the code, and its own failure modes to learn.
+
+**The thresholds are written down** in `services/ingestion/src/handler.ts`, beside the
+code the `Map` state would replace: a run approaching the 15-minute Lambda ceiling,
+embedding needing concurrency to stay under Bedrock TPM (roughly thousands of chunks per
+run), or one document exceeding Lambda memory. The handler calls the same core functions
+the state machine would have called, so that migration is a wiring change.
+
+**What did NOT get simplified away**, because each is a real failure mode rather than
+scale-driven ceremony:
+
+- `ObjectRemoved` purges vectors. Deleting the S3 object does not, and an orphaned policy
+  is *worse* than a missing one — the bot quotes it confidently and the store no longer
+  has it.
+- A nightly reconciliation catches deletes whose notification was never delivered. S3
+  notifications are at-least-once, not exactly-once.
+- `reservedConcurrentExecutions: 1`. Uploading three files fires three notifications, and
+  two concurrent runs would race on the same vectors and the same DynamoDB state.
+- Bucket versioning. A human edits these documents through the console; overwriting the
+  return policy with a truncated file is a plausible Tuesday.
+- Ingestion state is **one DynamoDB item per product**, not one item holding a list. The
+  list form breaks at ~8,000 products against the 400KB item limit — and it breaks
+  mid-run, after the vectors are written, leaving state and index out of step.
+
+**PDFs are deliberately not ingested.** The files in `data/documents/pdf/` are *generated*
+from the markdown beside them, for customers to download. Extracting text from a PDF we
+produced from text we already have is a lossy round trip through a layout format, and it
+turns a clean size table into whatever the extractor makes of it. A PDF that *arrives* as
+a PDF is a real case; the seam belongs in the handler when one shows up.

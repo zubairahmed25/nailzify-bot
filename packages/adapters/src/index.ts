@@ -7,7 +7,8 @@
  * adapters (docs/07-backend.md).
  */
 
-export { createBedrockEmbedder, type BedrockEmbedderConfig } from "./bedrock/embedder.js";
+export { createBedrockEmbedder,
+  EMBEDDING_MODEL, type BedrockEmbedderConfig } from "./bedrock/embedder.js";
 export { createBedrockReranker, type BedrockRerankerConfig } from "./bedrock/reranker.js";
 export {
   createBedrockLlmClient,
@@ -41,3 +42,13 @@ export {
   ConcurrentSessionUpdate,
   type DynamoConversationRepoConfig,
 } from "./dynamodb/conversation-repo.js";
+export {
+  createIngestionStateStore,
+  type IngestionStateStore,
+  type IngestionStateConfig,
+} from "./dynamodb/ingestion-state.js";
+export {
+  createSecretsManagerProvider,
+  type CachingSecretsProvider,
+  type SecretsProviderConfig,
+} from "./aws/secrets.js";
