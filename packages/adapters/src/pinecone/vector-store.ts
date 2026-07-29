@@ -43,6 +43,23 @@ export interface PineconeConfig {
   readonly indexName: string;
 }
 
+/**
+ * True for a Pinecone 404.
+ *
+ * Matched structurally rather than by importing the SDK's error class, which is
+ * not exported from the package root — an instanceof check against a deep
+ * import would break on any internal reshuffle.
+ */
+function isNotFound(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const name = (error as { name?: unknown }).name;
+  const message = (error as { message?: unknown }).message;
+  return (
+    name === "PineconeNotFoundError" ||
+    (typeof message === "string" && message.includes("404"))
+  );
+}
+
 export function createPineconeVectorStore(config: PineconeConfig): VectorStore {
   const index = new Pinecone({ apiKey: config.apiKey }).index(config.indexName);
   const ns = (namespace: Namespace) => index.namespace(namespace);
@@ -96,7 +113,41 @@ export function createPineconeVectorStore(config: PineconeConfig): VectorStore {
         // rather than rebuilding the whole index (docs/03-ingestion.md §3.5).
         await ns(namespace).deleteMany({ documentId: { $eq: documentId } });
       } catch (cause) {
-        throw new VectorStoreUnavailable("Pinecone delete failed", { cause });
+        if (!isNotFound(cause)) {
+          throw new VectorStoreUnavailable("Pinecone delete failed", { cause });
+        }
+
+        // ⚠️ A 404 HERE IS AMBIGUOUS, AND THE TWO MEANINGS DEMAND OPPOSITE
+        // RESPONSES.
+        //
+        //   (a) The namespace has never been written to. Pinecone 404s rather
+        //       than treating it as an empty set. This is the FIRST RUN against
+        //       a fresh index, every time — ingestDocument deletes before it
+        //       upserts, so the very first operation of a new deployment hits
+        //       it. Deleting nothing from nothing already has the desired end
+        //       state; a delete is idempotent by nature.
+        //
+        //   (b) Delete-by-metadata-filter is not working at all. Swallowing
+        //       THAT would be silent corruption: every re-ingest would leave the
+        //       previous version's chunks in place, the index would accumulate
+        //       stale duplicates of every document forever, and retrieval would
+        //       start quoting superseded policies. No error, no test failure.
+        //
+        // Distinguishing them is one cheap call on an error path that is
+        // otherwise rare. An empty namespace makes (a) certain.
+        const stats = await index.describeIndexStats();
+        const recordCount = stats.namespaces?.[namespace]?.recordCount ?? 0;
+
+        if (recordCount > 0) {
+          throw new VectorStoreUnavailable(
+            `Pinecone returned 404 deleting documentId="${documentId}" from namespace ` +
+              `"${namespace}", which holds ${recordCount} records. The namespace is not ` +
+              `empty, so this is not a first-run no-op — delete-by-metadata-filter is ` +
+              `failing. Treating it as success would leave stale chunks in the index on ` +
+              `every re-ingest, and the bot would quote superseded documents.`,
+            { cause },
+          );
+        }
       }
     },
   };
