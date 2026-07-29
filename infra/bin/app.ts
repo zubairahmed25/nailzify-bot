@@ -66,6 +66,7 @@ const ingestion = new IngestionStack(app, `Nailzify-${envName}-Ingestion`, {
   env,
   envName,
   table: data.table,
+  documentsBucket: data.documentsBucket,
   storefrontSecret: data.shopifyStorefrontSecret,
   pineconeSecret: data.pineconeSecret,
   shopDomain: config.shopDomain,

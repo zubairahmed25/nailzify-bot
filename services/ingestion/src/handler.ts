@@ -54,7 +54,19 @@ export type IngestionEvent =
   | { readonly mode: "products" }
   | { readonly mode: "documents" }
   | { readonly mode: "all" }
+  /** EventBridge — what the deployed bucket actually sends. */
+  | EventBridgeS3Event
+  /** Bucket notification — kept because it is trivial and easy to get wrong. */
   | { readonly Records: readonly S3Record[] };
+
+interface EventBridgeS3Event {
+  readonly source: "aws.s3";
+  readonly "detail-type": string;
+  readonly detail: {
+    readonly bucket: { readonly name: string };
+    readonly object: { readonly key: string };
+  };
+}
 
 interface S3Record {
   readonly eventName: string;
@@ -62,6 +74,49 @@ interface S3Record {
     readonly bucket: { readonly name: string };
     readonly object: { readonly key: string };
   };
+}
+
+/** One shape for both delivery mechanisms, so the logic below sees only this. */
+interface ObjectChange {
+  readonly removed: boolean;
+  readonly bucket: string;
+  readonly key: string;
+}
+
+/**
+ * ⚠️ THE TWO EVENT SOURCES ENCODE KEYS DIFFERENTLY.
+ *
+ * A bucket NOTIFICATION percent-encodes the key and turns spaces into "+", so
+ * "size guide.md" arrives as "size+guide.md" and a raw lookup 404s.
+ * EventBridge sends the key VERBATIM. Decoding an EventBridge key would corrupt
+ * any filename containing a legitimate "+" or "%".
+ *
+ * Both bugs only surface for filenames a non-engineer would produce through the
+ * S3 console, which is exactly who uploads these documents.
+ */
+function toObjectChanges(event: ObjectEvent): readonly ObjectChange[] {
+  if ("Records" in event) {
+    return event.Records.map((record) => ({
+      removed: record.eventName.startsWith("ObjectRemoved"),
+      bucket: record.s3.bucket.name,
+      key: decodeURIComponent(record.s3.object.key.replace(/\+/g, " ")),
+    }));
+  }
+
+  return [
+    {
+      removed: event["detail-type"] === "Object Deleted",
+      bucket: event.detail.bucket.name,
+      key: event.detail.object.key,
+    },
+  ];
+}
+
+type ObjectEvent = EventBridgeS3Event | { readonly Records: readonly S3Record[] };
+
+/** Type predicate, not a boolean — narrowing is what makes the union usable. */
+function isObjectEvent(event: IngestionEvent): event is ObjectEvent {
+  return "Records" in event || ("source" in event && event.source === "aws.s3");
 }
 
 export interface IngestionResult {
@@ -97,7 +152,7 @@ export async function handleIngestion(
   event: IngestionEvent,
   deps: IngestionDeps,
 ): Promise<IngestionResult> {
-  if ("Records" in event) return handleS3Records(event.Records, deps);
+  if (isObjectEvent(event)) return handleObjectChanges(toObjectChanges(event), deps);
 
   const documents =
     event.mode === "documents" || event.mode === "all" ? await syncAllDocuments(deps) : [];
@@ -111,21 +166,18 @@ export async function handleIngestion(
 // S3-triggered: one object changed
 // ---------------------------------------------------------------------------
 
-async function handleS3Records(
-  records: readonly S3Record[],
+async function handleObjectChanges(
+  changes: readonly ObjectChange[],
   deps: IngestionDeps,
 ): Promise<IngestionResult> {
   const documents: IngestionResult["documents"][number][] = [];
   const warnings: string[] = [];
 
-  for (const record of records) {
-    // S3 percent-encodes keys in event notifications, and turns spaces into "+".
-    // Reading the raw key means "size guide.md" is looked up as "size+guide.md"
-    // and 404s — a failure that only appears for filenames with spaces.
-    const key = decodeURIComponent(record.s3.object.key.replace(/\+/g, " "));
+  for (const change of changes) {
+    const key = change.key;
     const id = documentIdFromKey(key);
 
-    if (record.eventName.startsWith("ObjectRemoved")) {
+    if (change.removed) {
       // Deleting the object does not remove the vectors. Without this the bot
       // keeps quoting a policy that no longer exists — worse than having no
       // policy, because it is confidently wrong.
@@ -140,7 +192,7 @@ async function handleS3Records(
       continue;
     }
 
-    const markdown = await deps.documents.read(record.s3.bucket.name, key);
+    const markdown = await deps.documents.read(change.bucket, key);
     const report = await ingestOne(toSourceDocument(id, key, markdown), deps);
     documents.push(report);
   }

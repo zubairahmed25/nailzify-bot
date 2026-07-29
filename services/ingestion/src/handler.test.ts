@@ -277,3 +277,61 @@ describe("modes", () => {
     expect(result.warnings).toContain('"Snowflake Wishes": no shape metafield (custom.nail_text)');
   });
 });
+
+// ---------------------------------------------------------------------------
+// EventBridge — the shape the DEPLOYED bucket actually sends
+// ---------------------------------------------------------------------------
+
+const ebEvent = (detailType: string, key: string): IngestionEvent => ({
+  source: "aws.s3",
+  "detail-type": detailType,
+  detail: { bucket: { name: "docs-bucket" }, object: { key } },
+});
+
+describe("EventBridge delivery", () => {
+  it("indexes a created object", async () => {
+    const d = deps({ files: { "raw/return-policy.md": POLICY } });
+
+    const result = await handleIngestion(ebEvent("Object Created", "raw/return-policy.md"), d.deps);
+
+    expect(result.documents[0]).toMatchObject({ documentId: "return-policy", action: "indexed" });
+  });
+
+  it("purges vectors on Object Deleted", async () => {
+    const d = deps({ documentVersions: { "return-policy": "abc123" } });
+
+    await handleIngestion(ebEvent("Object Deleted", "raw/return-policy.md"), d.deps);
+
+    expect(d.deletedDocuments).toEqual(["return-policy"]);
+  });
+
+  it("does NOT url-decode an EventBridge key", async () => {
+    // ⚠️ THE TWO SOURCES DIFFER. A bucket notification percent-encodes the key
+    // and turns spaces into "+"; EventBridge sends it verbatim. Decoding an
+    // EventBridge key would corrupt any filename containing a legitimate "+" or
+    // "%" — and "size+guide.md" is a name a person genuinely types.
+    const d = deps({ files: { "raw/size+guide.md": POLICY } });
+
+    await handleIngestion(ebEvent("Object Created", "raw/size+guide.md"), d.deps);
+
+    expect(d.readKeys).toEqual(["raw/size+guide.md"]);
+  });
+
+  it("still url-decodes a bucket-notification key", async () => {
+    // The other half of the same rule, so neither can be "fixed" into the other.
+    const d = deps({ files: { "raw/size guide.md": POLICY } });
+
+    await handleIngestion(s3Event("ObjectCreated:Put", "raw/size+guide.md"), d.deps);
+
+    expect(d.readKeys).toEqual(["raw/size guide.md"]);
+  });
+
+  it("is not mistaken for a mode event", async () => {
+    const d = deps({ files: { "raw/return-policy.md": POLICY } });
+
+    const result = await handleIngestion(ebEvent("Object Created", "raw/return-policy.md"), d.deps);
+
+    // A products sync must not run just because a document changed.
+    expect(result.products).toBeNull();
+  });
+});

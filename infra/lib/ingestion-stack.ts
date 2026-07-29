@@ -5,14 +5,15 @@
  * WHY THIS IS ITS OWN STACK
  * ============================================================================
  *
- * Not because it is large, but because its BLAST RADIUS is different. The API
- * stack is deployed on every change to the chat path and holds nothing that
- * cannot be rebuilt. This stack owns the document bucket — the store's actual
- * policy documents — which must survive a bad deploy of unrelated code.
+ * Not because it is large, but because its BLAST RADIUS is different. This stack
+ * holds only compute and rules — everything in it can be destroyed and rebuilt
+ * from source. The documents themselves live in the DATA stack, with RETAIN on
+ * them, because they are the one thing here that cannot be regenerated.
  *
- * Splitting by "what happens when this is destroyed?" rather than by "what
- * belongs together conceptually?" is the rule that has kept the other two stacks
- * useful (docs/09-deployment.md §9.2).
+ * An earlier version of this file created its own document bucket with the same
+ * name as the Data stack's. The deploy failed with "already exists", which was
+ * the correct outcome — splitting by "what happens when this is destroyed?"
+ * only works if each thing has exactly one owner (docs/09-deployment.md §9.2).
  *
  * ============================================================================
  * NO STEP FUNCTIONS
@@ -33,7 +34,6 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
-import * as s3n from "aws-cdk-lib/aws-s3-notifications";
 import type * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import type { Construct } from "constructs";
 import * as path from "node:path";
@@ -45,6 +45,16 @@ const repoRoot = path.resolve(here, "../..");
 export interface IngestionStackProps extends cdk.StackProps {
   readonly envName: string;
   readonly table: dynamodb.Table;
+  /**
+   * Owned by the DATA stack, not this one.
+   *
+   * It holds the store's real policy documents — state, with RETAIN on it — and
+   * the rule for splitting these stacks is blast radius: what must survive a bad
+   * deploy of unrelated code lives in Data. An earlier version of this file
+   * created its own bucket with the identical name and the deploy failed with
+   * "already exists", which was the right outcome.
+   */
+  readonly documentsBucket: s3.Bucket;
   readonly storefrontSecret: secretsmanager.Secret;
   readonly pineconeSecret: secretsmanager.Secret;
   readonly shopDomain: string;
@@ -54,45 +64,21 @@ export interface IngestionStackProps extends cdk.StackProps {
   readonly embedModelId: string;
 }
 
-/** Where documents are uploaded. Anything outside it is ignored. */
-const DOCUMENT_PREFIX = "documents/";
+/**
+ * Where documents are uploaded. Anything outside it is ignored.
+ *
+ * Must match the `raw/` lifecycle rule already on the bucket in the Data stack —
+ * a different prefix here would mean uploads that are never archived and, worse,
+ * a trigger that never fires.
+ */
+const DOCUMENT_PREFIX = "raw/";
 
 export class IngestionStack extends cdk.Stack {
-  readonly documentBucket: s3.Bucket;
-
   constructor(scope: Construct, id: string, props: IngestionStackProps) {
     super(scope, id, props);
     const { envName } = props;
-    const isProd = envName === "prod";
 
-    // ---- Document bucket --------------------------------------------------
-    this.documentBucket = new s3.Bucket(this, "DocumentBucket", {
-      bucketName: `nailzify-${envName}-documents-${this.account}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      enforceSSL: true,
-
-      // ⚠️ VERSIONING IS THE UNDO BUTTON. These are the store's real policy
-      // documents, edited by a human through the console. Overwriting the return
-      // policy with a truncated file is a plausible Tuesday, and without
-      // versioning the previous text is simply gone — including from the index,
-      // which re-ingests whatever it now finds.
-      versioned: true,
-
-      // Source documents, not rebuildable artifacts. RETAIN in prod means a
-      // `cdk destroy` cannot take the policies with it.
-      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: !isProd,
-
-      lifecycleRules: [
-        {
-          // Old versions are an undo buffer, not an archive. Keeping them
-          // forever is a quiet cost leak on a versioned bucket.
-          noncurrentVersionExpiration: cdk.Duration.days(90),
-          abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
-        },
-      ],
-    });
+    const documentsBucket = props.documentsBucket;
 
     // ---- Lambda -----------------------------------------------------------
     const ingestFn = new nodejs.NodejsFunction(this, "IngestionHandler", {
@@ -133,7 +119,7 @@ export class IngestionStack extends cdk.Stack {
         NODE_OPTIONS: "--enable-source-maps",
         NAILZIFY_ENV: envName,
         TABLE_NAME: props.table.tableName,
-        DOCUMENT_BUCKET: this.documentBucket.bucketName,
+        DOCUMENT_BUCKET: documentsBucket.bucketName,
         DOCUMENT_PREFIX,
         SHOP_DOMAIN: props.shopDomain,
         STOREFRONT_DOMAIN: props.storefrontDomain,
@@ -159,7 +145,7 @@ export class IngestionStack extends cdk.Stack {
     // READ ONLY on the bucket. This function indexes documents; it has no reason
     // to write or delete one, and a bug that could rewrite the store's return
     // policy is a much worse failure than one that cannot index it.
-    this.documentBucket.grantRead(ingestFn);
+    documentsBucket.grantRead(ingestFn);
 
     // Embedding only. No chat model, no streaming action — this function has no
     // reason to invoke a generative model, and IAM is where that is enforced
@@ -174,18 +160,30 @@ export class IngestionStack extends cdk.Stack {
     );
 
     // ---- Trigger 1: a document changed ------------------------------------
-    for (const eventType of [
-      s3.EventType.OBJECT_CREATED,
-      // Without this, deleting a document leaves its vectors behind and the bot
-      // keeps quoting a policy the store no longer has.
-      s3.EventType.OBJECT_REMOVED,
-    ]) {
-      this.documentBucket.addEventNotification(
-        eventType,
-        new s3n.LambdaDestination(ingestFn),
-        { prefix: DOCUMENT_PREFIX },
-      );
-    }
+    //
+    // Via EventBridge rather than a bucket notification, because the bucket
+    // already has `eventBridgeEnabled: true` and lives in another stack.
+    // Attaching a notification to a cross-stack bucket provisions a custom
+    // resource that mutates it from here — two stacks writing one bucket's
+    // configuration, and a deploy-order hazard for no gain.
+    //
+    // ⚠️ THE EVENT SHAPE IS DIFFERENT. EventBridge sends `detail.bucket.name`
+    // and `detail.object.key`; a bucket notification sends `Records[]`. The
+    // handler accepts both, because getting this wrong produces a Lambda that
+    // is invoked correctly and then does nothing.
+    new events.Rule(this, "DocumentChanged", {
+      ruleName: `nailzify-${envName}-document-changed`,
+      description: "Reindex or purge a document when its S3 object changes.",
+      eventPattern: {
+        source: ["aws.s3"],
+        detailType: ["Object Created", "Object Deleted"],
+        detail: {
+          bucket: { name: [documentsBucket.bucketName] },
+          object: { key: [{ prefix: DOCUMENT_PREFIX }] },
+        },
+      },
+      targets: [new targets.LambdaFunction(ingestFn, { retryAttempts: 2 })],
+    });
 
     // ---- Trigger 2: nightly catalogue resync ------------------------------
     //
@@ -210,9 +208,9 @@ export class IngestionStack extends cdk.Stack {
       ],
     });
 
-    new cdk.CfnOutput(this, "DocumentBucketName", {
-      value: this.documentBucket.bucketName,
-      description: `Upload documents under ${DOCUMENT_PREFIX} to index them.`,
+    new cdk.CfnOutput(this, "UploadDocumentsTo", {
+      value: `s3://${documentsBucket.bucketName}/${DOCUMENT_PREFIX}`,
+      description: "Upload markdown here to index it. Deleting an object purges its vectors.",
     });
   }
 }
