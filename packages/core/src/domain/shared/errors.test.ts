@@ -8,7 +8,7 @@ describe("wrapped causes survive Lambda serialization", () => {
   }
 
   /** What AWS Lambda actually emits: own ENUMERABLE properties only. */
-  const serializeLikeLambda = (error: Error) => ({
+  const serializeLikeLambda = (error: Error): Record<string, unknown> => ({
     errorType: error.name,
     errorMessage: error.message,
     ...Object.fromEntries(Object.entries(error)),
@@ -26,8 +26,8 @@ describe("wrapped causes survive Lambda serialization", () => {
 
     const serialized = serializeLikeLambda(error);
 
-    expect(serialized.errorMessage).toContain("Pinecone upsert failed");
-    expect(serialized.errorMessage).toContain("must be a string, number, boolean");
+    expect(String(serialized["errorMessage"])).toContain("Pinecone upsert failed");
+    expect(String(serialized["errorMessage"])).toContain("must be a string, number, boolean");
   });
 
   it("still preserves the original error object for in-process handling", () => {

@@ -62,7 +62,11 @@ describe("auth failures explain themselves", () => {
     // pointing at the wrong cause.
     const error = await failure(clientWith(PUBLIC_TOKEN, { status: 430 }));
 
-    expect(error.message).toBe("Shopify returned HTTP 430");
+    // The response body still gets folded in — that is the cause-surfacing
+    // behaviour and it is wanted everywhere. What must NOT appear is a token
+    // hint, which would point at the wrong cause entirely.
+    expect(error.message).toContain("HTTP 430");
+    expect(error.message).not.toMatch(/token|scope|shpat_/i);
   });
 
   it("never puts the token itself in the message", async () => {
