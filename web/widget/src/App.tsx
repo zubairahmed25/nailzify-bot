@@ -44,6 +44,46 @@ export function App() {
     if (open) panel.current?.querySelector("textarea")?.focus();
   }, [open]);
 
+  // ---- scroll lock ---------------------------------------------------------
+  //
+  // ⚠️ `overflow: hidden` ON BODY IS NOT ENOUGH ON iOS. Safari ignores it for
+  // touch scrolling, so the storefront kept scrolling behind a full-screen chat
+  // panel — the customer drags to read an answer and the product page moves
+  // instead. `position: fixed` on the body is what actually stops it.
+  //
+  // Fixing the body scrolls the page to the top, so the offset is captured and
+  // restored on close. Skipping that lands the customer back at the top of the
+  // storefront after every conversation, which reads as the widget breaking the
+  // page.
+  useEffect(() => {
+    if (!open) return;
+    // Only on the layout where the panel is full-screen. On desktop the page
+    // behind stays usable on purpose.
+    if (!matchMedia("(max-width: 480px)").matches) return;
+
+    const { body } = document;
+    const scrollY = window.scrollY;
+    const previous = {
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+
+    return () => {
+      body.style.position = previous.position;
+      body.style.top = previous.top;
+      body.style.width = previous.width;
+      body.style.overflow = previous.overflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [open]);
+
   return (
     <>
       <button

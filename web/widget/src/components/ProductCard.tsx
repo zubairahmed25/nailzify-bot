@@ -16,8 +16,11 @@ export function ProductCard({ product }: { product: ProductRef }) {
     <a
       class="nz-card"
       href={product.url}
-      target="_blank"
-      rel="noopener noreferrer"
+      // ⚠️ SAME TAB, deliberately. A new tab is the right default for a link
+      // that leaves the site; this one goes to a product page on the SAME store.
+      // Opening a second tab there orphans the conversation in the first one and
+      // leaves the customer to find their way back.
+      rel="noopener"
       aria-label={`${product.title}, ${product.price}${product.available ? "" : ", sold out"}`}
     >
       {product.imageUrl ? (
