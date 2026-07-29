@@ -2,13 +2,29 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "baseUrl": ".",
     "paths": {
-      "@nailzify/core": ["packages/core/src/index.ts"],
-      "@nailzify/core/*": ["packages/core/src/*"]
+      "@nailzify/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@nailzify/core/*": [
+        "packages/core/src/*"
+      ]
     }
   },
-  "include": ["packages/*/src/**/*.ts", "services/*/src/**/*.ts", "**/*.test.ts"],
-  "exclude": ["node_modules", "**/dist", "cdk.out"]
+  "include": [
+    "packages/*/src/**/*.ts",
+    "services/*/src/**/*.ts",
+    "scripts/**/*.ts",
+    "**/*.test.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/dist",
+    "cdk.out",
+    "infra"
+  ]
 }

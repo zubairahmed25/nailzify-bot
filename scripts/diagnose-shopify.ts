@@ -13,6 +13,11 @@
  * It NEVER prints the token — only its length and a masked prefix.
  */
 
+// Marks this file a module. Without it TypeScript treats every script as one
+// shared global scope, so top-level `const token` in two scripts collide — and
+// top-level `await` is rejected.
+export {};
+
 const shopDomain = process.env["SHOPIFY_SHOP_DOMAIN"];
 const token = process.env["SHOPIFY_STOREFRONT_TOKEN"];
 

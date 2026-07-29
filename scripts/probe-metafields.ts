@@ -21,6 +21,11 @@
  * back null while products load fine, that is the cause — not a wrong namespace.
  */
 
+// Marks this file a module. Without it TypeScript treats every script as one
+// shared global scope, so top-level `const token` in two scripts collide — and
+// top-level `await` is rejected.
+export {};
+
 const shopDomain = process.env["SHOPIFY_SHOP_DOMAIN"];
 const token = process.env["SHOPIFY_STOREFRONT_TOKEN"];
 const apiVersion = process.env["SHOPIFY_API_VERSION"] ?? "2025-10";

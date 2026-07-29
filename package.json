@@ -13,7 +13,7 @@
     "infra"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p infra/tsconfig.json",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:watch": "vitest",

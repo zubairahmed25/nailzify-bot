@@ -32,6 +32,7 @@ import {
   type SourceDocument,
 } from "@nailzify/core";
 import {
+  EMBEDDING_MODEL,
   createBedrockEmbedder,
   createPineconeVectorStore,
   createShopifyProductCatalog,
@@ -118,8 +119,8 @@ async function loadDocuments(): Promise<SourceDocument[]> {
 const STATE_FILE = ".ingest-state.json";
 
 interface IngestState {
-  readonly documentVersions: Record<string, string>;
-  readonly indexedProductIds: string[];
+  documentVersions: Record<string, string>;
+  indexedProductIds: string[];
 }
 
 async function loadState(): Promise<IngestState> {
@@ -175,7 +176,13 @@ if (dryRun) {
 
 // ---- Real run --------------------------------------------------------------
 
-const embedder = createBedrockEmbedder({ region: process.env["AWS_REGION"] ?? "us-east-1" });
+// Model and dimension from the shared constant, never typed here — ingestion and
+// query must agree exactly or the index rejects everything.
+const embedder = createBedrockEmbedder({
+  region: process.env["AWS_REGION"] ?? "us-east-1",
+  modelId: EMBEDDING_MODEL.modelId,
+  dimensions: EMBEDDING_MODEL.dimensions,
+});
 const vectors = createPineconeVectorStore({
   apiKey: requireEnv("PINECONE_API_KEY"),
   indexName: requireEnv("PINECONE_INDEX"),
@@ -217,6 +224,9 @@ if (only === "both" || only === "products") {
     client: createStorefrontClient({
       shopDomain: requireEnv("SHOPIFY_SHOP_DOMAIN"),
       accessToken: requireEnv("SHOPIFY_STOREFRONT_TOKEN"),
+      // ⚠️ Shopify retires API versions after ~12 months, and a retired one
+      // fails like a bad credential rather than saying the version is gone.
+      apiVersion: process.env["SHOPIFY_API_VERSION"] ?? "2025-10",
     }),
     storefrontDomain: "nailzify.com",
     onWarning: (w) => warnings.push(w),

@@ -1,0 +1,22 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+
+    // ⚠️ RELAXED FOR THIS DIRECTORY ONLY, and only this flag.
+    //
+    // aws-cdk-lib's interfaces declare optional properties WITHOUT `| undefined`,
+    // which predates exactOptionalPropertyTypes. Under that flag a concrete
+    // `Bucket` is not assignable to the `IBucket` parameter it was built for —
+    // a library-boundary incompatibility, not a defect in our code.
+    //
+    // The alternative was casting at each call site, which spreads with every
+    // new construct and eventually reads as normal. Scoping the relaxation to
+    // infra/ keeps packages/ and services/ at full strictness, which is where
+    // the flag actually earns its keep.
+    "exactOptionalPropertyTypes": false
+  },
+  "include": ["bin/**/*.ts", "lib/**/*.ts"],
+  "exclude": ["cdk.out", "node_modules"]
+}
