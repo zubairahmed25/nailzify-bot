@@ -17,44 +17,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readSse } from "./sse.js";
 import type { ChatMessage } from "./types.js";
+import {
+  loadPersistedState,
+  loadSessionId,
+  newId,
+  savePersistedState,
+} from "./persistence.js";
 
 export type { ChatMessage, ProductRef } from "./types.js";
+export { loadPersistedState, savePersistedState } from "./persistence.js";
 
 /** Shopify App Proxy path. Shopify forwards this to the Lambda with an HMAC. */
 const ENDPOINT = "/apps/nailzify-chat/message";
 
-/** Matches the server's ID_PATTERN: 8-64 chars of [A-Za-z0-9_-]. */
-const SESSION_KEY = "nailzify.chat.session";
-
 export type Status = "idle" | "thinking" | "streaming" | "error";
 
-function newId(): string {
-  // crypto.randomUUID is unavailable on http:// origins and in older Safari.
-  // A storefront runs on https, but a merchant previewing over http is a real
-  // case and a hard crash there is a bad way to find out.
-  const uuid =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  return uuid.replace(/-/g, "").slice(0, 32);
-}
-
-function loadSessionId(): string {
-  try {
-    const stored = sessionStorage.getItem(SESSION_KEY);
-    if (stored) return stored;
-    const created = newId();
-    sessionStorage.setItem(SESSION_KEY, created);
-    return created;
-  } catch {
-    // Safari in private mode throws on sessionStorage. Losing continuity across
-    // a reload is a far smaller problem than the widget failing to load at all.
-    return newId();
-  }
-}
-
 export function useChat() {
-  const [messages, setMessages] = useState<readonly ChatMessage[]>([]);
+  const [messages, setMessages] = useState<readonly ChatMessage[]>(
+    () => loadPersistedState().messages,
+  );
   const [status, setStatus] = useState<Status>("idle");
   const [toolActivity, setToolActivity] = useState<string | null>(null);
 
@@ -66,6 +47,13 @@ export function useChat() {
   // A generation still running after the widget unmounts bills Bedrock for
   // tokens nobody will read.
   useEffect(() => () => abort.current?.abort(), []);
+
+  // Persisted on every change rather than on unload: `beforeunload` is
+  // unreliable on mobile Safari, which is exactly where a customer taps a
+  // product card and never fires it.
+  useEffect(() => {
+    savePersistedState({ open: loadPersistedState().open, messages });
+  }, [messages]);
 
   const send = useCallback(async (text: string) => {
     const trimmed = text.trim();

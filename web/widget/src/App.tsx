@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Composer } from "./components/Composer.js";
 import { Message } from "./components/Message.js";
-import { useChat } from "./useChat.js";
+import { loadPersistedState, savePersistedState, useChat } from "./useChat.js";
 
 const GREETING =
   "Hi! I can help you find a set, work out your size, or answer questions about " +
@@ -9,12 +9,19 @@ const GREETING =
 
 export function App() {
   const { messages, status, toolActivity, send, stop } = useChat();
-  const [open, setOpen] = useState(false);
+  // Reopens itself after a navigation. Landing on a product page with the chat
+  // closed makes it look like the conversation ended, when the customer only
+  // followed a recommendation the bot gave them.
+  const [open, setOpen] = useState(() => loadPersistedState().open);
   const scroller = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const launcher = useRef<HTMLButtonElement>(null);
 
   const busy = status === "thinking" || status === "streaming";
+
+  useEffect(() => {
+    savePersistedState({ open, messages });
+  }, [open, messages]);
 
   // Follow the stream, but only when the customer is already at the bottom.
   // Yanking the view down while someone is reading an earlier answer is one of
@@ -25,6 +32,15 @@ export function App() {
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
     if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [messages, toolActivity]);
+
+  // On open — including the reopen after a navigation — jump to the latest
+  // message. Restoring a conversation scrolled to its beginning shows the
+  // customer the greeting instead of the answer they just acted on.
+  useEffect(() => {
+    if (!open) return;
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [open]);
 
   // Escape closes, and focus returns to the launcher. Without the second half,
   // a keyboard user is dumped at the top of the merchant's page.
