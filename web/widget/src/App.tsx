@@ -1,20 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { loadFont } from "./index.js";
+import { AgentAvatar } from "./components/AgentAvatar.js";
 import { Composer } from "./components/Composer.js";
 import { Message } from "./components/Message.js";
 import { loadPersistedState, savePersistedState, useChat } from "./useChat.js";
-
-/** Support headphones. Stroked with currentColor so the button owns the colour. */
-function HeadphonesIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M4 15v-3a8 8 0 0 1 16 0v3" />
-      <path d="M6 19a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2h1a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1z" />
-      <path d="M18 19a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-1a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1z" />
-    </svg>
-  );
-}
 
 function CloseIcon() {
   return (
@@ -134,12 +123,11 @@ export function App() {
         aria-controls="nz-panel"
         aria-label={open ? "Close chat" : "Chat with us about nails"}
       >
-        {/* ⚠️ AN SVG, NOT AN EMOJI. The old 💬 rendered as a different glyph on
-            every platform — Apple, Google and Microsoft draw unrelated speech
-            bubbles, none of them in the brand colour, and the merchant had no
-            control over any of it. An inline path is identical everywhere and
-            inherits currentColor. */}
-        {open ? <CloseIcon /> : <HeadphonesIcon />}
+        {/* ⚠️ AN SVG, NOT AN EMOJI. The original 💬 rendered as a different
+            glyph on every platform — Apple, Google and Microsoft draw unrelated
+            speech bubbles, none in the brand colour, and the merchant had no
+            control over any of it. */}
+        {open ? <CloseIcon /> : <AgentAvatar />}
       </button>
 
       <div
