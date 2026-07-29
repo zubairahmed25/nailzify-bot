@@ -4,7 +4,16 @@
  *     npx vite-node scripts/verify-retrieval.ts
  *
  * Runs the real pipeline — chunk -> embed (Bedrock) -> index -> search — against
- * a miniature Nailzify corpus, and prints the score distribution.
+ * THE STORE'S ACTUAL DOCUMENTS, and prints the score distribution.
+ *
+ * ⚠️ IT USED TO USE THREE INVENTED DOCUMENTS. A shipping policy and a nail care
+ * guide, neither of which Nailzify has, plus a returns policy that did not match
+ * the real one. It reported "5/5 correct" and that number meant nothing: three of
+ * the five questions targeted documents the store does not own, and the size
+ * guide — which is live, and which sizing questions depend on — was never tested.
+ *
+ * Calibrating a relevance floor on a corpus you do not have produces a floor for
+ * a corpus you do not have. It now reads data/documents/*.md.
  *
  * ⚠️ MAKES REAL BEDROCK CALLS. Costs a fraction of a cent per run. Deliberately
  * NOT part of `npm test`: the unit suite must stay free, offline and instant.
@@ -19,63 +28,36 @@
  * RE-RUN THIS whenever you change the embedding model, its dimensions, or the
  * chunking policy. Scores from different models are not comparable.
  */
+import { readFile, readdir } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
 import { chunkMarkdown, structuralContextHeader, embeddingText } from "@nailzify/core";
 import {
+  EMBEDDING_MODEL,
   createBedrockEmbedder,
   createBedrockReranker,
   createInMemoryVectorStore,
 } from "@nailzify/adapters";
 
-const SHIPPING = `
-# Nailzify Shipping Policy
+const DOCS_DIR = "data/documents";
 
-## Domestic Shipping
-Standard shipping within the United States takes 3-5 business days.
-Orders placed before 2pm ET ship the same business day. Free shipping
-applies to orders over $35.
-
-## International Shipping
-We ship to Canada, the United Kingdom, and Australia. International
-delivery takes 7-14 business days. Customers are responsible for any
-customs duties or import taxes charged on arrival.
-`;
-
-const CARE = `
-# Nail Care Guide
-
-## Wear Time
-With correct application, a set stays on for 7 to 10 days. Oily nail
-beds may shorten this. Avoid prolonged soaking in hot water during the
-first 24 hours.
-
-## Safe Removal
-Soak fingertips in warm soapy water for 10 minutes, then gently lift
-each nail from the side using a wooden stick. Never force or peel a
-press-on off, as this removes layers of the natural nail.
-`;
-
-const RETURNS = `
-# Return Policy
-
-## Eligibility
-Returns are accepted within 30 days of delivery. Products must be
-unopened and in original packaging with all seals intact.
-
-## Hygiene Exclusions
-For hygiene reasons we cannot accept returns on any set where the
-seal has been broken, even if the nails were never worn.
-`;
-
-const DOCS = [
-  { id: "shipping-policy", title: "Shipping Policy", markdown: SHIPPING },
-  { id: "nail-care-guide", title: "Nail Care Guide", markdown: CARE },
-  { id: "returns-policy", title: "Return Policy", markdown: RETURNS },
-];
+/**
+ * The real corpus, read from disk — the same files scripts/ingest.ts indexes.
+ */
+const DOCS = await Promise.all(
+  (await readdir(DOCS_DIR))
+    .filter((n) => extname(n) === ".md")
+    .sort()
+    .map(async (name) => {
+      const markdown = await readFile(join(DOCS_DIR, name), "utf8");
+      const id = basename(name, ".md");
+      return { id, title: /^#\s+(.+)$/m.exec(markdown)?.[1]?.trim() ?? id, markdown };
+    }),
+);
 
 const embedder = createBedrockEmbedder({
-  region: "us-east-1",
-  modelId: "cohere.embed-v4:0",
-  dimensions: 1024,
+  region: process.env["AWS_REGION"] ?? "us-east-1",
+  modelId: EMBEDDING_MODEL.modelId,
+  dimensions: EMBEDDING_MODEL.dimensions,
 });
 const reranker = createBedrockReranker({ region: "us-east-1", maxAttempts: 8 });
 const store = createInMemoryVectorStore();
@@ -126,11 +108,27 @@ console.log(`  total: ${totalChunks} vectors, ${embedder.dimensions} dims\n`);
 // Each question deliberately avoids the wording of its target chunk, so a
 // keyword search would fail. This is what "semantic" has to earn.
 const QUESTIONS: { q: string; expect: string }[] = [
-  { q: "how long do they stay on before falling off?", expect: "nail-care-guide" },
-  { q: "can I get my money back if I opened the packet?", expect: "returns-policy" },
-  { q: "do you post to Britain?", expect: "shipping-policy" },
-  { q: "what's the safest way to take them off without wrecking my nails?", expect: "nail-care-guide" },
-  { q: "will I be charged extra fees at the border?", expect: "shipping-policy" },
+  { q: "can I get my money back if I opened the packet?", expect: "return-policy" },
+  { q: "what happens if my set turns up broken?", expect: "return-policy" },
+  { q: "I'm outside the US — who pays to send them back?", expect: "return-policy" },
+  { q: "how do I work out which set fits me?", expect: "size-guide" },
+  { q: "my middle nail measures about 12mm, what should I order?", expect: "size-guide" },
+  { q: "should I go bigger or smaller if I'm between sizes?", expect: "size-guide" },
+];
+
+/**
+ * Questions with NO supporting document, kept separate from the pass/fail set.
+ *
+ * These are ordinary things a press-on customer asks, and the store has nothing
+ * written down for any of them. The correct behaviour is abstention — but that
+ * makes them invisible in a pass rate, which is exactly how a coverage gap
+ * survives. Reported explicitly below so the gap is a decision, not an accident.
+ */
+const UNCOVERED = [
+  "how long do they stay on before they fall off?",
+  "what is the safest way to take them off?",
+  "do you ship to the UK?",
+  "how long does delivery take?",
 ];
 
 console.log("SEARCH  (cosine -> rerank)");
@@ -203,9 +201,47 @@ console.log(
     `${bestOffRerank.toFixed(3).padStart(14)}   ` +
     `${ratio(worstCorrectRerank, bestOffRerank).toFixed(2)}x`,
 );
-console.log(
-  `\n  suggested rerankFloor: ${((worstCorrectRerank + bestOffRerank) / 2).toFixed(3)}` +
-    `  (midpoint of the gap)`,
-);
+const suggestedFloor = (worstCorrectRerank + bestOffRerank) / 2;
+console.log(`\n  suggested rerankFloor: ${suggestedFloor.toFixed(3)}  (midpoint of the gap)`);
+
+// A floor is only meaningful if the gap it sits in is wide enough to survive a
+// question phrased slightly differently. Narrow separation means the floor is
+// fitted to these exact five questions rather than to the corpus.
+const margin = worstCorrectRerank - bestOffRerank;
+if (margin < 0.02) {
+  console.log(
+    `  ⚠️ MARGIN IS ONLY ${margin.toFixed(3)}. The floor sits in a very narrow gap, so a\n` +
+      `     differently-worded question could land on the wrong side of it. Treat this\n` +
+      `     as provisional and widen the question set before trusting it.`,
+  );
+}
+
+// ---- COVERAGE ----
+//
+// The part a pass rate cannot show. Every question here is one a press-on
+// customer genuinely asks and the store has no document for. Abstention is the
+// CORRECT response — but "correctly says I don't know" and "answers well" are
+// very different customer experiences, and only one of them is a sale.
+console.log(`\nCOVERAGE GAPS (no document answers these)`);
+for (const q of UNCOVERED) {
+  const [v] = await embedder.embedBatch([q], "query");
+  const near = await store.searchKnowledge(v!, 3);
+  await pace();
+  const [best] = await reranker.rerank(q, near, 1);
+
+  const score = best?.rerankScore ?? 0;
+  // Above the floor means the bot will ANSWER, using a document that does not
+  // actually cover the question. That is worse than abstaining: a confident
+  // answer about shipping, sourced from the returns policy.
+  const risk = score >= suggestedFloor ? "  <-- WOULD ANSWER ANYWAY" : "";
+  console.log(
+    `  "${q}"\n     best match: ${best?.chunk.documentId ?? "none"}` +
+      `   rerank ${score.toFixed(3)}${risk}`,
+  );
+}
 
 console.log(`\nRESULT: ${passed}/${QUESTIONS.length} semantic matches correct`);
+console.log(
+  `        ${UNCOVERED.length} common questions have no supporting document — ` +
+    `see COVERAGE GAPS above.`,
+);
