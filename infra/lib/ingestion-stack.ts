@@ -78,6 +78,10 @@ export class IngestionStack extends cdk.Stack {
     super(scope, id, props);
     const { envName } = props;
 
+    // Opt-in, because a new AWS account cannot satisfy it. See the note below.
+    const reserveConcurrency =
+      this.node.tryGetContext("reserveIngestionConcurrency") === "true";
+
     const documentsBucket = props.documentsBucket;
 
     // ---- Lambda -----------------------------------------------------------
@@ -97,11 +101,32 @@ export class IngestionStack extends cdk.Stack {
       // than burn 15 minutes of billed time retrying inside one invocation.
       timeout: cdk.Duration.minutes(5),
 
-      // ⚠️ ONE AT A TIME. Two concurrent runs would race on the same vectors and
-      // the same DynamoDB state — one deleting a document's chunks while the
-      // other writes them. Uploading three files at once fires three
-      // notifications, so this is the normal case, not an edge case.
-      reservedConcurrentExecutions: 1,
+      // ⚠️ WANTS TO BE 1, AND CANNOT BE ON A NEW AWS ACCOUNT.
+      //
+      // One at a time is correct here: two concurrent runs can race on the same
+      // document — one deleting its chunks while the other writes them — and
+      // uploading three files at once fires three events, so it is the normal
+      // case rather than an edge case.
+      //
+      // But a fresh account has a TOTAL Lambda concurrency of 10, and AWS
+      // requires at least 10 to remain unreserved. Any reservation whatsoever is
+      // rejected:
+      //
+      //   Specified ReservedConcurrentExecutions for function decreases
+      //   account's UnreservedConcurrentExecution below its minimum value of [10]
+      //
+      // So it is opt-in, and off by default. Once the account quota is raised
+      // (Service Quotas -> Lambda -> "Concurrent executions"), redeploy with:
+      //
+      //   npx cdk deploy --all -c reserveIngestionConcurrency=true
+      //
+      // WHAT THE RISK ACTUALLY IS while it is off: chunk ids are deterministic
+      // and re-ingest is idempotent, so two runs over the same document converge
+      // on the same end state. The exposure is the window where one run's delete
+      // lands after the other's upsert, leaving that document briefly missing
+      // from the index until the next run. Bounded and self-healing — not
+      // nothing, but not a reason to block the deploy.
+      ...(reserveConcurrency ? { reservedConcurrentExecutions: 1 } : {}),
 
       bundling: {
         minify: true,
