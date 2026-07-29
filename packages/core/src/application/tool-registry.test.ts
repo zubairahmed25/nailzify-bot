@@ -509,3 +509,50 @@ describe("what the model is told about a product", () => {
     expect(outcome.content).not.toContain("<attributes>");
   });
 });
+
+describe("what the widget receives", () => {
+  const candidate: ProductCandidate = {
+    productId: ProductId("gid://shopify/Product/1"),
+    score: 0.8,
+    priceBand: "15-25",
+    attributes: attrs,
+  };
+
+  it("collects the hydrated product, not just its id", async () => {
+    // ⚠️ THE ANTI-HALLUCINATION RULE AT THE PRESENTATION TIER. The widget renders
+    // a card with a price on it. If only ids travelled, that price would have to
+    // be re-fetched or parsed back out of the model's prose — and a price parsed
+    // out of prose was written by a language model, which is the exact failure
+    // the two-plane rule exists to prevent.
+    const registry = deps({ candidates: [candidate], products: [product()] });
+    const artifacts = newTurnArtifacts();
+
+    await registry.execute(call(TOOL_NAMES.searchProducts, { query: "bridal" }), artifacts);
+
+    expect(artifacts.products).toHaveLength(1);
+    expect(artifacts.products[0]!.price.amountMinor).toBe(2400);
+    expect(artifacts.products[0]!.available).toBe(true);
+  });
+
+  it("collects a product fetched by handle too", async () => {
+    const registry = deps({ byHandle: product() });
+    const artifacts = newTurnArtifacts();
+
+    await registry.execute(
+      call(TOOL_NAMES.productDetails, { handle: "bridal-almond-short" }),
+      artifacts,
+    );
+
+    expect(artifacts.products).toHaveLength(1);
+  });
+
+  it("collects nothing when nothing was shown", async () => {
+    // No card must appear for a turn that only answered a policy question.
+    const registry = deps({ knowledge: [scored(chunk("c1", "Returns within 14 days."))] });
+    const artifacts = newTurnArtifacts();
+
+    await registry.execute(call(TOOL_NAMES.searchKnowledge, { query: "returns" }), artifacts);
+
+    expect(artifacts.products).toEqual([]);
+  });
+});

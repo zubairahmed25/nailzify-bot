@@ -7,6 +7,8 @@
  * object literals in milliseconds.
  */
 
+import type { Product } from "../domain/catalog/product.js";
+import { formatMoney } from "../domain/shared/money.js";
 import { err, ok, type Result } from "../domain/shared/result.js";
 import { MessageId, type SessionId, type CustomerId } from "../domain/shared/brand.js";
 import {
@@ -68,10 +70,58 @@ export type ChatEvent =
       readonly type: "done";
       readonly citations: readonly Citation[];
       readonly productIds: readonly ProductId[];
+      /**
+       * The products shown this turn, already formatted for display.
+       *
+       * ⚠️ THIS IS THE ANTI-HALLUCINATION RULE AT THE PRESENTATION TIER. The
+       * widget renders a card with a price on it. Sending only ids would force
+       * that price to come from somewhere else — a second fetch, or parsing it
+       * back out of the model's prose. The latter means the number a customer
+       * reads was produced by a language model, which is exactly what the
+       * two-plane rule exists to prevent.
+       *
+       * `price` is pre-formatted rather than sent as minor units plus a currency
+       * code, so the widget cannot get the formatting wrong either. Money
+       * formatting lives in one place, next to the type that enforces integer
+       * minor units.
+       */
+      readonly products: readonly DisplayProduct[];
       readonly escalated: boolean;
       readonly usage: TokenUsage;
     }
   | { readonly type: "refused"; readonly reason: string };
+
+/**
+ * A product as the widget renders it. Every field is live as of this request.
+ *
+ * Deliberately NOT the domain `Product`: variants, attributes and `fetchedAt`
+ * are of no use to a card and would be sent on every turn to every customer.
+ */
+export interface DisplayProduct {
+  readonly id: ProductId;
+  readonly title: string;
+  /** Pre-formatted, e.g. "$13.99". Never assembled in the browser. */
+  readonly price: string;
+  readonly url: string;
+  readonly imageUrl: string | null;
+  readonly available: boolean;
+}
+
+function dedupeById(products: readonly Product[]): readonly Product[] {
+  const seen = new Set<string>();
+  return products.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+}
+
+export function toDisplayProduct(product: Product): DisplayProduct {
+  return {
+    id: product.id,
+    title: product.title,
+    price: formatMoney(product.price),
+    url: product.url,
+    imageUrl: product.imageUrl,
+    available: product.available,
+  };
+}
 
 export function createHandleMessage(deps: HandleMessageDeps) {
   const windowPolicy = deps.windowPolicy ?? DEFAULT_WINDOW_POLICY;
@@ -203,6 +253,9 @@ export function createHandleMessage(deps: HandleMessageDeps) {
       type: "done",
       citations: artifacts.citations,
       productIds: artifacts.productIds,
+      // De-duplicated: a turn that searches and then fetches details on the same
+      // product would otherwise render it twice.
+      products: dedupeById(artifacts.products).map(toDisplayProduct),
       escalated: artifacts.escalated,
       usage: totals,
     };

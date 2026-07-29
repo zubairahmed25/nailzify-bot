@@ -1,0 +1,36 @@
+{%- comment -%}
+  Nailzify concierge widget.
+
+  INSTALL: Online Store -> Themes -> Edit code -> Snippets -> Add a new snippet
+  named `nailzify-concierge`, paste this in, then add ONE line to theme.liquid,
+  immediately before </body>:
+
+      {% render 'nailzify-concierge' %}
+
+  ⚠️ BEFORE </body>, NOT IN <head>. The script appends to document.body, and a
+  head-injected copy would run before body exists. It handles that case, but
+  loading render-blocking JS in the head of someone's storefront is rude
+  regardless.
+
+  ⚠️ `defer`, NEVER `async`. Both keep the parser unblocked; only `defer`
+  guarantees the script runs after the document is parsed. With `async` the
+  execution point is whenever the network happens to finish, which is a race
+  that shows up on slow connections and not on yours.
+{%- endcomment -%}
+
+{%- comment -%}
+  Preconnect saves a DNS + TLS round trip on the first message, which lands
+  squarely in the customer's perceived time-to-first-token.
+{%- endcomment -%}
+<link rel="preconnect" href="https://{{ shop.domain }}" crossorigin>
+
+<script
+  src="{{ 'nailzify-widget.js' | asset_url }}"
+  defer
+  {%- comment -%}
+    Subresource Integrity is deliberately omitted: `asset_url` is versioned by
+    Shopify's CDN and the file is replaced on every deploy, so a pinned hash
+    would break the widget on each release. The asset is served from Shopify's
+    own CDN over TLS.
+  {%- endcomment -%}
+></script>

@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "jsx": "react-jsx",
+    // Source is written as ordinary React. `preact/compat` provides the runtime,
+    // aliased in vite.config.ts — see the note there for why.
+    "jsxImportSource": "preact",
+    "moduleResolution": "bundler",
+    "paths": {
+      "react": ["../../node_modules/preact/compat"],
+      "react-dom": ["../../node_modules/preact/compat"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"]
+}
