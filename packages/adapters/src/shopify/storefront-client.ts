@@ -158,7 +158,7 @@ export function createStorefrontClient(config: StorefrontClientConfig): Storefro
       if (!response.ok) {
         // 430 is Shopify's "shop throttled" status; 429 is standard rate limit.
         throw new CatalogUnavailable(
-          `Shopify returned HTTP ${response.status}`,
+          `Shopify returned HTTP ${response.status}${authHint(response.status, config)}`,
           { cause: new Error(await safeText(response)) },
         );
       }
@@ -183,6 +183,48 @@ export function createStorefrontClient(config: StorefrontClientConfig): Storefro
       return body.data;
     },
   };
+}
+
+/**
+ * Turn a bare 401/403 into something actionable.
+ *
+ * ⚠️ THE TOKEN SHAPE IS A HINT ON THE ERROR PATH, NEVER A PRECONDITION. An
+ * earlier version of this file REFUSED to send tokens starting with "shpat_",
+ * on the belief that prefix meant Admin API. It does not — delegate and custom-app
+ * Storefront tokens share it — and the check blocked a perfectly valid token.
+ * Shape checks guess; Shopify knows. So this only ever runs after Shopify has
+ * already rejected the request, and it only ever adds text.
+ *
+ * The two kinds go in DIFFERENT HEADERS, so a valid token of the wrong kind is a
+ * 403 that looks exactly like a revoked credential:
+ *
+ *   public   32 hex chars, no prefix   X-Shopify-Storefront-Access-Token
+ *   private  shpat_...                 Shopify-Storefront-Private-Token
+ */
+function authHint(status: number, config: StorefrontClientConfig): string {
+  if (status !== 401 && status !== 403) return "";
+
+  const kind = config.tokenKind ?? "private";
+  const looksPublic = /^[a-f0-9]{32}$/i.test(config.accessToken);
+  const looksPrivate = config.accessToken.startsWith("shpat_");
+
+  if (kind === "private" && looksPublic) {
+    return (
+      ". The token is 32 hex characters with no prefix, which is the PUBLIC " +
+      'storefront token format, but it was sent in the private-token header. Use the ' +
+      "private token (starts with shpat_) for server-side calls, or set tokenKind: \"public\"."
+    );
+  }
+  if (kind === "public" && looksPrivate) {
+    return (
+      '. The token starts with "shpat_" (private) but was sent in the public-token ' +
+      "header. Drop tokenKind, or pass the public token instead."
+    );
+  }
+  return (
+    ". Check the token has the unauthenticated_read_product_listings scope and that " +
+    "the app is installed — scope changes require a reinstall to take effect."
+  );
 }
 
 async function safeText(response: Response): Promise<string> {
