@@ -59,7 +59,12 @@
    * on first open, so the first paint of every panel uses it.
    */
   font-family: "Josefin Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-weight: 300;
+  /*
+   * 400, not 300. Josefin at 300 is beautiful on a heading and thin for a
+   * paragraph — and this widget's job is paragraphs a customer reads on a phone
+   * in daylight. Headings and product titles carry the character at 600.
+   */
+  font-weight: 400;
 }
 
 /*

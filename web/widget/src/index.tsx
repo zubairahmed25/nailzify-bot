@@ -56,10 +56,10 @@ export function loadFont(): void {
   const link = document.createElement("link");
   link.id = FONT_ID;
   link.rel = "stylesheet";
-  // 300 for body as specified; 600 for emphasis, because bolding a 300 weight
-  // by synthesis looks smeared and Josefin ships a real semibold.
+  // Only the two weights actually used. Requesting a face that is never rendered
+  // costs the customer a download for nothing.
   link.href =
-    "https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;600&display=swap";
+    "https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600&display=swap";
   document.head.appendChild(link);
 }
 
