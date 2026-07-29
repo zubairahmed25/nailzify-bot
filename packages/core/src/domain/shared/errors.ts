@@ -30,11 +30,48 @@ export abstract class InfrastructureError extends Error {
   abstract readonly retryable: boolean;
 
   constructor(message: string, options?: { cause?: unknown }) {
-    // ALWAYS pass `cause` through. Losing the original stack when wrapping an
-    // error is the single most common reason production debugging gets hard.
-    super(message, options);
+    // ⚠️ `cause` ALONE IS NOT ENOUGH, AND BELIEVING IT WAS COST A DEPLOY CYCLE.
+    //
+    // Passing `cause` to super() is correct and preserves it in-process. It does
+    // NOT survive AWS Lambda's error serialization: Lambda emits errorType,
+    // errorMessage, and stack, plus own ENUMERABLE properties. `cause` is
+    // non-enumerable, so CloudWatch showed only:
+    //
+    //     {"errorType":"$d","errorMessage":"Pinecone upsert failed"}
+    //
+    // — a wrapper message with the actual reason stripped out, from a minified
+    // bundle where even the class name is mangled. Undiagnosable.
+    //
+    // So the cause is folded into the message itself, which survives every
+    // serializer, and exposed as an enumerable field for structured log queries.
+    super(joinCause(message, options?.cause), options);
     this.name = new.target.name;
+    this.causeMessage = describeCause(options?.cause);
   }
+
+  /** Enumerable, unlike `cause` — this is what reaches CloudWatch. */
+  readonly causeMessage: string | null;
+}
+
+/** Longest cause text folded into a message. Enough to identify, not to flood. */
+const MAX_CAUSE_LENGTH = 300;
+
+function describeCause(cause: unknown): string | null {
+  if (cause === undefined || cause === null) return null;
+  const text = cause instanceof Error ? cause.message : String(cause);
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.length > MAX_CAUSE_LENGTH
+    ? `${trimmed.slice(0, MAX_CAUSE_LENGTH)}… (truncated)`
+    : trimmed;
+}
+
+function joinCause(message: string, cause: unknown): string {
+  const detail = describeCause(cause);
+  // Skip when the cause adds nothing — a wrapper that already quotes it, or a
+  // cause whose message IS the wrapper message.
+  if (!detail || message.includes(detail)) return message;
+  return `${message}: ${detail}`;
 }
 
 // ---------------------------------------------------------------------------
