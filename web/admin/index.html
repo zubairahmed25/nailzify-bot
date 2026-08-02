@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nailzify — Knowledge base</title>
+
+    <!--
+      App Bridge, current recommended setup (2026): an unversioned CDN script
+      plus a meta tag naming the app's Client ID. This is NOT the older
+      `@shopify/app-bridge` npm package + `createApp()` pattern — that is
+      still findable in search results but superseded. Loading this BEFORE
+      any app code creates `window.shopify`, which src/api.ts calls
+      `shopify.idToken()` on for every authenticated request.
+
+      The meta tag's content below is a placeholder token Vite replaces at
+      BUILD TIME with the VITE_SHOPIFY_API_KEY env var (Vite's HTML env
+      replacement — confirmed by building once and inspecting dist/index.html,
+      not assumed from docs alone; it string-replaces everywhere, including
+      inside HTML comments, which is why this comment doesn't spell the token
+      out literally). See README.md for where that env var's value comes from
+      — the same `shopifyApiKey` CDK context value services/admin's Lambda
+      already validates the `aud` claim against.
+    -->
+    <meta name="shopify-api-key" content="%VITE_SHOPIFY_API_KEY%" />
+    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+  </body>
+</html>
