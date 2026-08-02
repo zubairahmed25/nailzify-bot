@@ -71,40 +71,34 @@ export class DataStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
-    // Backs "every session for this customer" (sessionId/createdAt) AND,
-    // since packages/adapters/src/dynamodb/ingestion-state.ts reused this same
-    // GSI for admin-uploaded PDFs, "every upload, newest first" too.
-    //
-    // ⚠️ EVERY FIELD A GSI READER NEEDS MUST BE LISTED HERE. This is not
-    // optional metadata — DynamoDB physically does not copy unprojected
-    // attributes into the index, and a Query against it returns exactly what
-    // was projected and nothing else, silently. `listUploadedDocuments()`
-    // querying GSI1 for status/title/s3Key/etc. with only sessionId/createdAt
-    // projected got back items with just the key attributes — every other
-    // field genuinely absent, not merely empty. `toUploadedDocument`'s
-    // defensive fallbacks then made every upload look permanently stuck
-    // "processing" against a live table, invisible in tests because the
-    // mocked DynamoDB client there doesn't enforce projection filtering the
-    // way the real service does. Confirmed by querying this GSI directly.
+    // Backs "every session for this customer", which is how a GDPR erasure
+    // request is serviced. Only signed-in sessions carry the key, so the index
+    // stays small.
     this.table.addGlobalSecondaryIndex({
       indexName: "GSI1",
       partitionKey: { name: "GSI1PK", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "GSI1SK", type: dynamodb.AttributeType.STRING },
-      // Only the attributes any GSI1 reader needs. A GSI is a full copy of
-      // whatever you project, with its own write cost — ALL is rarely the
-      // right answer.
+      // Only the attributes the lookup needs. A GSI is a full copy of whatever
+      // you project, with its own write cost — ALL is rarely the right answer.
       projectionType: dynamodb.ProjectionType.INCLUDE,
-      nonKeyAttributes: [
-        "sessionId",
-        "createdAt",
-        "status",
-        "title",
-        "docType",
-        "errorMessage",
-        "s3Key",
-        "uploadedAt",
-        "updatedAt",
-      ],
+      nonKeyAttributes: ["sessionId", "createdAt"],
+    });
+
+    // Backs "every admin-uploaded document, newest first" — originally
+    // reused GSI1 (same physical mechanism: constant partition key, a
+    // timestamp-led sort key), which turned out not to work: DynamoDB flatly
+    // refuses to change an EXISTING index's projected attributes —
+    // "Cannot update GSI's properties other than Provisioned Throughput...
+    // create a new GSI with a different name" — confirmed the hard way
+    // against the live table. A GSI's projection is fixed at creation, not a
+    // property you can widen later, so uploads get their own index instead of
+    // reopening that fight if a THIRD reader ever needs different fields.
+    this.table.addGlobalSecondaryIndex({
+      indexName: "GSI2",
+      partitionKey: { name: "GSI2PK", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "GSI2SK", type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.INCLUDE,
+      nonKeyAttributes: ["status", "title", "docType", "errorMessage", "s3Key", "uploadedAt", "updatedAt"],
     });
 
     // ---- Source documents -------------------------------------------------

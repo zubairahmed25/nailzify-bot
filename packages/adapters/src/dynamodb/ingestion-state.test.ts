@@ -45,16 +45,16 @@ describe("recordUploadStarted", () => {
     expect(put?.input.Item).toMatchObject({
       PK: "INGEST#UPLOAD",
       SK: "doc-1",
-      GSI1PK: "INGEST#UPLOAD",
+      GSI2PK: "INGEST#UPLOAD",
       status: "processing",
       title: null,
       docType: null,
       errorMessage: null,
       s3Key: "raw/uploads/doc-1.pdf",
     });
-    // GSI1SK leads with the timestamp so a plain query sorts by upload time —
+    // GSI2SK leads with the timestamp so a plain query sorts by upload time —
     // no separate sort step needed when listing.
-    expect(put?.input.Item.GSI1SK).toMatch(/^\d{4}-\d{2}-\d{2}T.*#doc-1$/);
+    expect(put?.input.Item.GSI2SK).toMatch(/^\d{4}-\d{2}-\d{2}T.*#doc-1$/);
   });
 
   it("stamps uploadedAt and updatedAt identically on creation", async () => {
@@ -173,8 +173,8 @@ describe("listUploadedDocuments", () => {
     const results = await store.listUploadedDocuments();
 
     expect(find("QueryCommand")?.input).toMatchObject({
-      IndexName: "GSI1",
-      KeyConditionExpression: "GSI1PK = :pk",
+      IndexName: "GSI2",
+      KeyConditionExpression: "GSI2PK = :pk",
       ExpressionAttributeValues: { ":pk": "INGEST#UPLOAD" },
       ScanIndexForward: false,
     });

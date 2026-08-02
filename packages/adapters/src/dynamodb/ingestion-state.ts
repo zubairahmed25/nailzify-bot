@@ -238,15 +238,17 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
           Item: {
             PK: UPLOAD_PK,
             SK: documentId,
-            // Mirrored onto the shared GSI so the admin page can list uploads
-            // newest-first without a table scan. GSI1PK is a constant, not
+            // Mirrored onto GSI2 — its OWN index, not GSI1, after discovering
+            // live that DynamoDB cannot widen an existing GSI's projection
+            // (infra/lib/data-stack.ts) — so the admin page can list uploads
+            // newest-first without a table scan. GSI2PK is a constant, not
             // per-document, precisely so ONE query returns all of them —
-            // sorting happens for free via GSI1SK, which leads with the
+            // sorting happens for free via GSI2SK, which leads with the
             // timestamp. Fine at "a company's own documents" scale (dozens to
             // low hundreds); a single hot partition would need revisiting long
             // before that, at a volume nothing here is designed for.
-            GSI1PK: UPLOAD_PK,
-            GSI1SK: `${now}#${documentId}`,
+            GSI2PK: UPLOAD_PK,
+            GSI2SK: `${now}#${documentId}`,
             status: "processing" satisfies UploadStatus,
             title: null,
             docType: null,
@@ -265,7 +267,7 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
           TableName: config.tableName,
           Key: { PK: UPLOAD_PK, SK: documentId },
           // SET only the fields this write actually knows about. A full PutItem
-          // would silently erase uploadedAt/s3Key/GSI1SK if this ever ran before
+          // would silently erase uploadedAt/s3Key/GSI2SK if this ever ran before
           // recordUploadStarted — an ordering that should not happen, but SET
           // makes it harmless rather than merely unlikely.
           UpdateExpression:
@@ -316,10 +318,10 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
         const result = await client.send(
           new QueryCommand({
             TableName: config.tableName,
-            IndexName: "GSI1",
-            KeyConditionExpression: "GSI1PK = :pk",
+            IndexName: "GSI2",
+            KeyConditionExpression: "GSI2PK = :pk",
             ExpressionAttributeValues: { ":pk": UPLOAD_PK },
-            // Newest first. GSI1SK leads with an ISO timestamp, so descending
+            // Newest first. GSI2SK leads with an ISO timestamp, so descending
             // order on the sort key IS newest-first — no separate sort needed.
             ScanIndexForward: false,
             ExclusiveStartKey: start,
