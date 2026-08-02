@@ -30,7 +30,15 @@ const env: cdk.Environment = {
 // Store configuration. Non-secret, so it lives in code rather than Secrets
 // Manager — these are identifiers, not credentials.
 const config = {
-  shopDomain: app.node.tryGetContext("shopDomain") ?? "nailzify.myshopify.com",
+  // ⚠️ NOT "nailzify.myshopify.com". The store was renamed to that at some
+  // point after creation, and Shopify keeps the rename working for Storefront
+  // API calls (both resolve to the same store — verified by querying `{ shop
+  // { name } }` against each) — which is exactly why this was wrong for
+  // months without the chat path ever surfacing it. Session tokens are signed
+  // against the ORIGINAL, canonical handle regardless of the rename; embedded
+  // admin auth failed with "shop mismatch" until this was corrected to the
+  // value actually inside a real token's `dest`/`iss` claims.
+  shopDomain: app.node.tryGetContext("shopDomain") ?? "dgjv8c-aa.myshopify.com",
   storefrontDomain: app.node.tryGetContext("storefrontDomain") ?? "nailzify.com",
   pineconeIndex: `nailzify-${envName}`,
 

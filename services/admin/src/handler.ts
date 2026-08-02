@@ -42,9 +42,18 @@ export async function handleAdminRequest(
     deps.apiKey,
     deps.shopDomain,
   );
-  // Deliberately vague in the response, same as the App Proxy's 401 — the real
+  // Deliberately vague in the RESPONSE, same as the App Proxy's 401 — the real
   // reason belongs in logs, not handed to whoever is knocking on the endpoint.
-  if (!auth.ok) return json(401, { error: "Unauthorized" });
+  // But it DOES belong in logs: without this, "Unauthorized" is the only
+  // signal we ourselves get, which is indistinguishable between "no header
+  // reached the Lambda at all" (a CloudFront forwarding problem) and "a
+  // header arrived but failed one specific claim check" (a config problem) —
+  // exactly the ambiguity this project has been burned by before with
+  // unverified Shopify assumptions (docs/LESSONS.md).
+  if (!auth.ok) {
+    console.warn(JSON.stringify({ level: "WARN", msg: "admin.auth.rejected", reason: auth.reason }));
+    return json(401, { error: "Unauthorized" });
+  }
 
   const method = event.requestContext?.http?.method ?? "GET";
   const path = event.rawPath ?? "";
