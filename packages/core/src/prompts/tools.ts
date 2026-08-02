@@ -45,11 +45,17 @@ export const TOOLS: readonly ToolDefinition[] = [
   {
     name: TOOL_NAMES.searchKnowledge,
     description:
-      "Search Nailzify's company documents — shipping policy, returns policy, sizing guide, " +
-      "application instructions, nail care guide, and FAQs. " +
+      "Search Nailzify's company documents. This includes shipping policy, returns policy, " +
+      "sizing guide, application instructions, nail care guide, and FAQs — but the store can " +
+      "add or update documents on ANY subject at any time (e.g. company background, who owns " +
+      "or runs the store, store history, other announcements), so this list is illustrative, " +
+      "not exhaustive. " +
       "Call this whenever the customer asks about policies, procedures, shipping, returns, " +
-      "refunds, sizing, measuring, application, removal, or care. " +
-      "Do not answer questions in these areas from memory — you do not know Nailzify's terms.",
+      "refunds, sizing, measuring, application, removal, care, or asks any other factual " +
+      "question about the store or company that the product catalog would not answer. Do not " +
+      "assume a topic is out of scope just because it is not named above — search first. " +
+      "Do not answer questions in these areas from memory — you do not know Nailzify's terms " +
+      "or details unless you search for them.",
     inputSchema: {
       type: "object",
       properties: {
