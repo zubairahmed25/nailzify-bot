@@ -48,6 +48,13 @@ const config = {
   // checks the `aud` claim against this value.
   shopifyApiKey: app.node.tryGetContext("shopifyApiKey") ?? "8c1a30f0e9846049c1a201038130bf9a",
 
+  // The Api stack's CloudFront domain — see the prop doc in
+  // infra/lib/data-stack.ts for why this is a bootstrapped config value
+  // rather than a real CDK cross-stack reference. Known only after the Api
+  // stack's first deploy; this is that value, not a placeholder.
+  distributionDomain:
+    app.node.tryGetContext("distributionDomain") ?? "d183repo6i6gjz.cloudfront.net",
+
   // ⚠️ Shopify supports each API version for ~12 months, then retires it. A
   // stale value fails like a bad credential rather than saying "version gone",
   // so this needs a periodic review — verified working via
@@ -80,7 +87,7 @@ const config = {
 const data = new DataStack(app, `Nailzify-${envName}-Data`, {
   env,
   envName,
-  shopDomain: config.shopDomain,
+  distributionDomain: config.distributionDomain,
 });
 
 const api = new ApiStack(app, `Nailzify-${envName}-Api`, {

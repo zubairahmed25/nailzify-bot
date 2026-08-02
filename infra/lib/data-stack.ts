@@ -23,8 +23,18 @@ import type { Construct } from "constructs";
 
 export interface DataStackProps extends cdk.StackProps {
   readonly envName: string;
-  /** Needed only for the documents bucket's CORS rule — see below. */
-  readonly shopDomain: string;
+  /**
+   * The Api stack's CloudFront domain (e.g. `d183repo6i6gjz.cloudfront.net`)
+   * — needed only for the documents bucket's CORS rule, see below. Passed as
+   * a plain string rather than a real CDK cross-stack reference: the
+   * distribution lives in ApiStack, which already depends on THIS stack for
+   * the table and bucket, so a reference the other way would be the exact
+   * cycle infra/bin/app.ts's OAC comment warns about. The domain is stable
+   * once the distribution exists (CloudFront doesn't reassign it on
+   * redeploy), so a bootstrapped config value — same pattern as
+   * `shopifyApiKey` — is the right tradeoff, not a real dependency.
+   */
+  readonly distributionDomain: string;
 }
 
 export class DataStack extends cdk.Stack {
@@ -89,16 +99,22 @@ export class DataStack extends cdk.Stack {
       // The admin page's browser PUTs a PDF directly to this bucket via a
       // presigned URL (services/admin/src/composition-root.ts) — the upload
       // never passes through a Lambda, so the BROWSER's own origin is what
-      // needs CORS permission here, not any of our compute. Embedded Shopify
-      // admin pages run inside https://admin.shopify.com today; the classic
-      // "https://{shop}.myshopify.com/admin" origin is allowed too since
-      // Shopify has changed this once already and might again. No wildcard —
-      // a leaked presigned URL is already bounded to one object and 5 minutes
-      // (upload endpoint's TTL); it should not also be usable from anywhere.
+      // needs CORS permission here.
+      //
+      // ⚠️ WRONG THE FIRST TIME: this listed https://admin.shopify.com and the
+      // shop's own myshopify.com domain, on the assumption that "embedded in
+      // Shopify admin" meant the request's Origin would be one of those. It
+      // doesn't — `Origin` on a fetch() is always the origin of the DOCUMENT
+      // RUNNING THE SCRIPT, not whatever iframes it. That document is our own
+      // admin page, served from the CloudFront distribution in
+      // infra/lib/api-stack.ts — confirmed from a real failing preflight's
+      // `Origin` header, not assumed. No wildcard — a leaked presigned URL is
+      // already bounded to one object and 5 minutes (upload endpoint's TTL);
+      // it should not also be usable from anywhere.
       cors: [
         {
           allowedMethods: [s3.HttpMethods.PUT],
-          allowedOrigins: ["https://admin.shopify.com", `https://${props.shopDomain}`],
+          allowedOrigins: [`https://${props.distributionDomain}`],
           allowedHeaders: ["*"],
           maxAge: 3000,
         },

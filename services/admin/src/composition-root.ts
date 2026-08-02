@@ -54,7 +54,23 @@ export interface AdminConfig {
 }
 
 export function buildAdminDeps(config: AdminConfig): AdminDeps {
-  const s3 = config.s3 ?? new S3Client({ region: config.region });
+  const s3 =
+    config.s3 ??
+    new S3Client({
+      region: config.region,
+      // ⚠️ LOAD-BEARING, NOT COSMETIC. The SDK's default ("WHEN_SUPPORTED")
+      // computes a CRC32 checksum at REQUEST-BUILD TIME for any operation that
+      // supports one, PutObject included. A presigned URL is built with no
+      // body — there is nothing yet to hash — so the default signs a checksum
+      // for an EMPTY object into the URL's query string. The browser's later
+      // PUT of the real, non-empty file then fails S3's checksum validation
+      // with a body that never had a chance to match. Confirmed by generating
+      // a presigned URL both ways and diffing the query string — the default
+      // client's URL carries `x-amz-checksum-crc32=AAAAAA==` (CRC32 of
+      // nothing); this one doesn't. WHEN_REQUIRED restores the pre-default
+      // behaviour: only attach a checksum when the caller explicitly asks.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+    });
   const ttlSeconds = config.uploadUrlTtlSeconds ?? 300;
 
   const keyFor = (documentId: string): string => `${UPLOAD_PREFIX}${documentId}.pdf`;
