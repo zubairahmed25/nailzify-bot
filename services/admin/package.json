@@ -1,0 +1,13 @@
+{
+  "name": "@nailzify/admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Admin Lambda behind the embedded Shopify admin page. Session-token authentication, presigned PDF upload URLs, upload status.",
+  "main": "./src/handler.ts",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.717.0",
+    "@aws-sdk/s3-request-presigner": "^3.717.0",
+    "@nailzify/adapters": "*"
+  }
+}

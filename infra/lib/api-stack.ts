@@ -38,6 +38,19 @@ export interface ApiStackProps extends cdk.StackProps {
   readonly fastModelId: string;
   readonly embedModelId: string;
   readonly rerankModelId: string;
+  /**
+   * Owned by the DATA stack. The admin Lambda presigns PUT URLs into it and
+   * deletes objects when a merchant removes an upload — see
+   * services/admin/src/composition-root.ts.
+   */
+  readonly documentsBucket: s3.Bucket;
+  /**
+   * The app's Client ID (API key) — NOT secret, unlike `proxySecret`. It is
+   * baked into the embedded admin page's frontend bundle by Shopify's own
+   * tooling, so treating it as sensitive here would be theatre. Used only to
+   * check the `aud` claim on a session token (services/admin/src/security/verify-session-token.ts).
+   */
+  readonly shopifyApiKey: string;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -172,6 +185,74 @@ export class ApiStack extends cdk.Stack {
       }),
     );
 
+    // ---- Admin Lambda -------------------------------------------------------
+    //
+    // Behind the embedded admin page, not the storefront. Session-token
+    // authenticated (services/admin/src/security/verify-session-token.ts), not
+    // App Proxy HMAC — a genuinely different caller. It never touches Bedrock
+    // or Pinecone: its entire job is minting a presigned S3 upload URL and
+    // reading/writing the `INGEST#UPLOAD` rows the ingestion Lambda already
+    // owns. Kept in THIS stack rather than a new one because this is where
+    // "everything deployed constantly, in front of the public internet"
+    // already lives — a second CloudFront distribution for one small Lambda
+    // would be a second WAF, a second domain, and a second thing to keep in
+    // sync for no isolation benefit this Lambda's blast radius needs.
+    const adminFn = new nodejs.NodejsFunction(this, "AdminHandler", {
+      functionName: `nailzify-${envName}-admin`,
+      entry: path.join(repoRoot, "services/admin/src/lambda.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+
+      bundling: {
+        minify: true,
+        sourceMap: true,
+        target: "node22",
+        format: nodejs.OutputFormat.ESM,
+        externalModules: [],
+        banner:
+          "import{createRequire}from'module';const require=createRequire(import.meta.url);",
+      },
+
+      environment: {
+        NODE_OPTIONS: "--enable-source-maps",
+        NAILZIFY_ENV: envName,
+        TABLE_NAME: props.table.tableName,
+        DOCUMENT_BUCKET: props.documentsBucket.bucketName,
+        SHOP_DOMAIN: props.shopDomain,
+        SHOPIFY_API_KEY: props.shopifyApiKey,
+        PROXY_SECRET_ARN: props.proxySecret.secretArn,
+      },
+
+      tracing: lambda.Tracing.ACTIVE,
+      logGroup: new logs.LogGroup(this, "AdminHandlerLogs", {
+        logGroupName: `/aws/lambda/nailzify-${envName}-admin`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+
+    props.table.grantReadWriteData(adminFn);
+    props.proxySecret.grantRead(adminFn);
+    // PUT (presigned upload URLs) and DELETE (removing an upload) only. No
+    // read grant — this Lambda never needs to look inside a document, and a
+    // bug here should not be able to exfiltrate one.
+    props.documentsBucket.grantPut(adminFn);
+    props.documentsBucket.grantDelete(adminFn);
+
+    const adminFunctionUrl = adminFn.addFunctionUrl({
+      // Same reasoning as the chat Function URL below: CloudFront cannot sign
+      // a PUT/POST body with SigV4 the way AWS_IAM + OAC would require, so
+      // this is NONE at the Function URL and relies on the session-token
+      // check inside the handler, same shape as the App Proxy HMAC guarding
+      // the chat endpoint.
+      authType: lambda.FunctionUrlAuthType.NONE,
+      // BUFFERED (the default) — nothing here streams. A JSON response in
+      // milliseconds needs none of the chat Lambda's RESPONSE_STREAM machinery.
+    });
+
     // ---- Streaming Function URL ------------------------------------------
     const functionUrl = chatFn.addFunctionUrl({
       // ⚠️ THIS WAS AWS_IAM + OAC, AND IT CANNOT WORK. Recorded because the
@@ -282,6 +363,21 @@ export class ApiStack extends cdk.Stack {
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
         },
+
+        "/admin/api/*": {
+          origin: new origins.FunctionUrlOrigin(adminFunctionUrl),
+          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+          // ⚠️ MUST forward Authorization — that is the entire auth mechanism
+          // for this path. ALL_VIEWER_EXCEPT_HOST_HEADER is confirmed by AWS's
+          // own docs to include it (unlike CloudFront's default legacy
+          // forwarding, which strips it) — the same policy already proven to
+          // pass the App Proxy's signed query string through untouched on
+          // /api/*. Still worth one real request before relying on this live,
+          // same discipline as every other Shopify-facing assumption here.
+          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+        },
       },
     });
 
@@ -292,6 +388,7 @@ export class ApiStack extends cdk.Stack {
       description: "Point the Shopify App Proxy at https://<this>/api",
     });
     new cdk.CfnOutput(this, "FunctionName", { value: chatFn.functionName });
+    new cdk.CfnOutput(this, "AdminFunctionName", { value: adminFn.functionName });
     new cdk.CfnOutput(this, "WidgetBucketName", { value: this.widgetBucket.bucketName });
   }
 }

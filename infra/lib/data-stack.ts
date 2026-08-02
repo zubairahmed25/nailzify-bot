@@ -23,6 +23,8 @@ import type { Construct } from "constructs";
 
 export interface DataStackProps extends cdk.StackProps {
   readonly envName: string;
+  /** Needed only for the documents bucket's CORS rule — see below. */
+  readonly shopDomain: string;
 }
 
 export class DataStack extends cdk.Stack {
@@ -84,6 +86,23 @@ export class DataStack extends cdk.Stack {
       // Uploading a document IS the ingestion trigger — no polling, no queue to
       // babysit, no "reindex" button.
       eventBridgeEnabled: true,
+      // The admin page's browser PUTs a PDF directly to this bucket via a
+      // presigned URL (services/admin/src/composition-root.ts) — the upload
+      // never passes through a Lambda, so the BROWSER's own origin is what
+      // needs CORS permission here, not any of our compute. Embedded Shopify
+      // admin pages run inside https://admin.shopify.com today; the classic
+      // "https://{shop}.myshopify.com/admin" origin is allowed too since
+      // Shopify has changed this once already and might again. No wildcard —
+      // a leaked presigned URL is already bounded to one object and 5 minutes
+      // (upload endpoint's TTL); it should not also be usable from anywhere.
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.PUT],
+          allowedOrigins: ["https://admin.shopify.com", `https://${props.shopDomain}`],
+          allowedHeaders: ["*"],
+          maxAge: 3000,
+        },
+      ],
       lifecycleRules: [
         {
           id: "archive-raw",

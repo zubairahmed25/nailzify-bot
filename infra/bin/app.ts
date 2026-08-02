@@ -34,6 +34,17 @@ const config = {
   storefrontDomain: app.node.tryGetContext("storefrontDomain") ?? "nailzify.com",
   pineconeIndex: `nailzify-${envName}`,
 
+  // ⚠️ PLACEHOLDER. The app's Client ID (API key), from the Partner
+  // Dashboard's app setup page — NOT secret (see the prop doc in
+  // infra/lib/api-stack.ts), but still real, deployment-specific
+  // configuration that does not exist until the embedded app is registered
+  // (Step 5 of the admin-upload plan). Session-token verification checks the
+  // `aud` claim against this value, so a request signed for the real app will
+  // fail closed against this placeholder rather than silently "working" —
+  // deploy with `-c shopifyApiKey=<real client id>` once it exists, and
+  // replace this default at the same time.
+  shopifyApiKey: app.node.tryGetContext("shopifyApiKey") ?? "REPLACE_WITH_SHOPIFY_CLIENT_ID",
+
   // ⚠️ Shopify supports each API version for ~12 months, then retires it. A
   // stale value fails like a bad credential rather than saying "version gone",
   // so this needs a periodic review — verified working via
@@ -63,7 +74,11 @@ const config = {
   rerankModelId: "cohere.rerank-v3-5:0",
 };
 
-const data = new DataStack(app, `Nailzify-${envName}-Data`, { env, envName });
+const data = new DataStack(app, `Nailzify-${envName}-Data`, {
+  env,
+  envName,
+  shopDomain: config.shopDomain,
+});
 
 const api = new ApiStack(app, `Nailzify-${envName}-Api`, {
   env,
@@ -72,6 +87,7 @@ const api = new ApiStack(app, `Nailzify-${envName}-Api`, {
   proxySecret: data.shopifyProxySecret,
   storefrontSecret: data.shopifyStorefrontSecret,
   pineconeSecret: data.pineconeSecret,
+  documentsBucket: data.documentsBucket,
   ...config,
 });
 
