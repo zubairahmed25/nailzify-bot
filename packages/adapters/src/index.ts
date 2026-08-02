@@ -46,6 +46,8 @@ export {
   createIngestionStateStore,
   type IngestionStateStore,
   type IngestionStateConfig,
+  type UploadStatus,
+  type UploadedDocument,
 } from "./dynamodb/ingestion-state.js";
 export {
   createSecretsManagerProvider,

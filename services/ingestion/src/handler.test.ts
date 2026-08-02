@@ -85,6 +85,14 @@ function deps(over: {
       replaceIndexedProducts: async (ids) => {
         indexedProducts = [...ids];
       },
+      // Admin-PDF-upload tracking. Not exercised by these tests yet — the
+      // ingestion handler doesn't call these until the PDF path is wired up —
+      // present only so this fake satisfies the interface.
+      recordUploadStarted: async () => {},
+      recordUploadReady: async () => {},
+      recordUploadFailed: async () => {},
+      deleteUploadRecord: async () => {},
+      listUploadedDocuments: async () => [],
     },
     drainWarnings: () => over.warnings ?? [],
   };

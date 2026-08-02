@@ -1,10 +1,30 @@
 /**
  * What the last ingestion run knew, so the next one can be incremental.
  *
- * Two questions, both answered from the existing single table:
+ * Three questions, all answered from the existing single table:
  *
  *   PK = INGEST#DOC      SK = <documentId>   the content version last indexed
  *   PK = INGEST#PRODUCT  SK = <productId>    this product is in the index
+ *   PK = INGEST#UPLOAD   SK = <documentId>   status of an admin-uploaded PDF
+ *
+ * ============================================================================
+ * WHY UPLOAD STATUS IS A SEPARATE RECORD FROM THE VERSION RECORD
+ * ============================================================================
+ *
+ * `INGEST#DOC` answers one question — "has this changed since last time?" —
+ * for the ingestion pipeline's own skip-logic. It has exactly one writer (the
+ * ingestion Lambda, after a successful run) and one reader (the same Lambda,
+ * next run).
+ *
+ * `INGEST#UPLOAD` answers a different question — "what is a human looking at
+ * the admin page allowed to believe is true right now?" — and has TWO writers
+ * at TWO different times: the upload endpoint writes `processing` the instant
+ * a PDF lands in S3, before ingestion has even started; the ingestion Lambda
+ * writes `ready` or `failed` seconds later, once it actually knows. Folding
+ * this into the version record would mean the admin page reading a document's
+ * "current" title from a record that a concurrent write is still assembling.
+ * Two records, two lifecycles, no ambiguity about which write is allowed to
+ * clobber which field.
  *
  * ============================================================================
  * WHY ONE ITEM PER PRODUCT RATHER THAN ONE LIST
@@ -27,16 +47,19 @@
 
 import {
   BatchWriteCommand,
+  DeleteCommand,
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
   QueryCommand,
+  UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { ProductId } from "@nailzify/core";
+import { ProductId, type DocType } from "@nailzify/core";
 
 const DOC_PK = "INGEST#DOC";
 const PRODUCT_PK = "INGEST#PRODUCT";
+const UPLOAD_PK = "INGEST#UPLOAD";
 
 /** DynamoDB caps BatchWrite at 25 items per request. Not negotiable. */
 const BATCH_LIMIT = 25;
@@ -57,6 +80,58 @@ export interface IngestionStateStore {
   listIndexedProducts(): Promise<readonly ProductId[]>;
   /** Replaces the recorded set: adds what is new, removes what is gone. */
   replaceIndexedProducts(ids: readonly ProductId[]): Promise<void>;
+
+  // ---------------------------------------------------------------------
+  // Admin-uploaded PDFs — what the admin page is allowed to show
+  // ---------------------------------------------------------------------
+
+  /**
+   * The upload endpoint calls this the instant a PDF lands in S3 — before
+   * ingestion has even started. Gives the admin page something honest to show
+   * ("Processing…") the moment the merchant hits upload, rather than a blank
+   * row until the Lambda gets around to it.
+   */
+  recordUploadStarted(input: { documentId: string; s3Key: string }): Promise<void>;
+
+  /**
+   * The ingestion Lambda calls this once extraction, classification and
+   * embedding have all succeeded. `title` and `docType` are what Claude
+   * detected from the PDF's own text, not merchant input.
+   */
+  recordUploadReady(input: {
+    documentId: string;
+    title: string;
+    docType: DocType;
+  }): Promise<void>;
+
+  /**
+   * The ingestion Lambda calls this if any step failed. `errorMessage` reaches
+   * the admin page verbatim, so keep it something a merchant can act on
+   * ("couldn't read any text from this PDF — is it a scanned image?") rather
+   * than a stack trace.
+   */
+  recordUploadFailed(input: { documentId: string; errorMessage: string }): Promise<void>;
+
+  /** Called when a merchant deletes an upload, alongside removing it from S3. */
+  deleteUploadRecord(documentId: string): Promise<void>;
+
+  /** Most recent first — the order a merchant expects their upload list in. */
+  listUploadedDocuments(): Promise<readonly UploadedDocument[]>;
+}
+
+export type UploadStatus = "processing" | "ready" | "failed";
+
+export interface UploadedDocument {
+  readonly documentId: string;
+  readonly status: UploadStatus;
+  /** Null until `recordUploadReady` runs — Claude hasn't looked at it yet. */
+  readonly title: string | null;
+  readonly docType: DocType | null;
+  /** Set only when `status === "failed"`. */
+  readonly errorMessage: string | null;
+  readonly s3Key: string;
+  readonly uploadedAt: string;
+  readonly updatedAt: string;
 }
 
 export interface IngestionStateConfig {
@@ -154,6 +229,136 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
         await writeBatchWithRetry(client, config.tableName, requests.slice(i, i + BATCH_LIMIT));
       }
     },
+
+    async recordUploadStarted({ documentId, s3Key }) {
+      const now = new Date().toISOString();
+      await client.send(
+        new PutCommand({
+          TableName: config.tableName,
+          Item: {
+            PK: UPLOAD_PK,
+            SK: documentId,
+            // Mirrored onto the shared GSI so the admin page can list uploads
+            // newest-first without a table scan. GSI1PK is a constant, not
+            // per-document, precisely so ONE query returns all of them —
+            // sorting happens for free via GSI1SK, which leads with the
+            // timestamp. Fine at "a company's own documents" scale (dozens to
+            // low hundreds); a single hot partition would need revisiting long
+            // before that, at a volume nothing here is designed for.
+            GSI1PK: UPLOAD_PK,
+            GSI1SK: `${now}#${documentId}`,
+            status: "processing" satisfies UploadStatus,
+            title: null,
+            docType: null,
+            errorMessage: null,
+            s3Key,
+            uploadedAt: now,
+            updatedAt: now,
+          },
+        }),
+      );
+    },
+
+    async recordUploadReady({ documentId, title, docType }) {
+      await client.send(
+        new UpdateCommand({
+          TableName: config.tableName,
+          Key: { PK: UPLOAD_PK, SK: documentId },
+          // SET only the fields this write actually knows about. A full PutItem
+          // would silently erase uploadedAt/s3Key/GSI1SK if this ever ran before
+          // recordUploadStarted — an ordering that should not happen, but SET
+          // makes it harmless rather than merely unlikely.
+          UpdateExpression:
+            "SET #status = :status, title = :title, docType = :docType, " +
+            "errorMessage = :noError, updatedAt = :now",
+          ExpressionAttributeNames: { "#status": "status" },
+          ExpressionAttributeValues: {
+            ":status": "ready" satisfies UploadStatus,
+            ":title": title,
+            ":docType": docType,
+            ":noError": null,
+            ":now": new Date().toISOString(),
+          },
+        }),
+      );
+    },
+
+    async recordUploadFailed({ documentId, errorMessage }) {
+      await client.send(
+        new UpdateCommand({
+          TableName: config.tableName,
+          Key: { PK: UPLOAD_PK, SK: documentId },
+          UpdateExpression: "SET #status = :status, errorMessage = :error, updatedAt = :now",
+          ExpressionAttributeNames: { "#status": "status" },
+          ExpressionAttributeValues: {
+            ":status": "failed" satisfies UploadStatus,
+            ":error": errorMessage,
+            ":now": new Date().toISOString(),
+          },
+        }),
+      );
+    },
+
+    async deleteUploadRecord(documentId) {
+      await client.send(
+        new DeleteCommand({
+          TableName: config.tableName,
+          Key: { PK: UPLOAD_PK, SK: documentId },
+        }),
+      );
+    },
+
+    async listUploadedDocuments() {
+      const items: UploadedDocument[] = [];
+      let start: Record<string, unknown> | undefined;
+
+      do {
+        const result = await client.send(
+          new QueryCommand({
+            TableName: config.tableName,
+            IndexName: "GSI1",
+            KeyConditionExpression: "GSI1PK = :pk",
+            ExpressionAttributeValues: { ":pk": UPLOAD_PK },
+            // Newest first. GSI1SK leads with an ISO timestamp, so descending
+            // order on the sort key IS newest-first — no separate sort needed.
+            ScanIndexForward: false,
+            ExclusiveStartKey: start,
+          }),
+        );
+        for (const item of result.Items ?? []) items.push(toUploadedDocument(item));
+        start = result.LastEvaluatedKey;
+      } while (start);
+
+      return items;
+    },
+  };
+}
+
+const KNOWN_STATUSES: readonly UploadStatus[] = ["processing", "ready", "failed"];
+
+function toUploadedDocument(item: Record<string, unknown>): UploadedDocument {
+  const str = (key: string): string | null =>
+    typeof item[key] === "string" ? (item[key] as string) : null;
+
+  const rawStatus = str("status");
+
+  return {
+    documentId: String(item["SK"]),
+    // Falls back to "processing" for BOTH a missing status and a value that is
+    // not one of the three this code knows about — the second case matters
+    // more than it looks. A future deploy that adds a new status value must
+    // not make every OLDER admin page reading this table throw on an item it
+    // doesn't recognise; a display bug for one row beats the whole list
+    // failing to load.
+    status: (KNOWN_STATUSES as readonly string[]).includes(rawStatus ?? "")
+      ? (rawStatus as UploadStatus)
+      : "processing",
+    title: str("title"),
+    docType: str("docType") as UploadedDocument["docType"],
+    errorMessage: str("errorMessage"),
+    s3Key: str("s3Key") ?? "",
+    uploadedAt: str("uploadedAt") ?? "",
+    updatedAt: str("updatedAt") ?? "",
   };
 }
 
