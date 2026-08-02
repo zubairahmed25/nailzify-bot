@@ -42,6 +42,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  classifyDocument,
   DocumentId,
   ingestDocument,
   ingestProducts,
@@ -123,7 +124,7 @@ export interface IngestionResult {
   readonly ok: boolean;
   readonly documents: readonly {
     readonly documentId: string;
-    readonly action: "indexed" | "skipped" | "removed";
+    readonly action: "indexed" | "skipped" | "removed" | "failed";
     readonly chunks: number;
   }[];
   readonly products: {
@@ -137,16 +138,20 @@ export interface IngestionResult {
 /**
  * Extensions this pipeline will ingest.
  *
- * ⚠️ NOT PDF, deliberately. The PDFs in data/documents/pdf are GENERATED from the
- * markdown next to them — they exist so a customer can download a size guide, not
- * as a source of truth. Ingesting them would mean extracting text from a file we
- * produced from text we already have: a lossy round trip through a layout format,
- * for no gain, that turns a clean table into whatever the extractor makes of it.
+ * ⚠️ PDF WAS DELIBERATELY EXCLUDED HERE, AND THAT REASONING NO LONGER APPLIES TO
+ * EVERY PDF. The PDFs in data/documents/pdf are GENERATED from the markdown next
+ * to them — customer downloads, not a source of truth — and re-ingesting a file
+ * we produced from text we already have would be a lossy round trip for nothing.
+ * That reasoning is still correct for THOSE specific files, which live outside
+ * `raw/` and are never uploaded here.
  *
- * A PDF that ARRIVES as a PDF — a supplier document, a scanned form — is a real
- * case, and the extraction seam belongs here when one shows up.
+ * It does not apply to a PDF that ARRIVES as a PDF — a merchant uploading a
+ * policy document through the admin page, which has no markdown original to
+ * prefer. See `isPdf` / `ingestPdf` below for that path: extract -> classify ->
+ * the same chunk/embed pipeline every other document already goes through.
  */
-const INGESTIBLE = /\.(md|markdown|txt)$/i;
+const INGESTIBLE = /\.(md|markdown|txt|pdf)$/i;
+const isPdf = (key: string): boolean => /\.pdf$/i.test(key);
 
 export async function handleIngestion(
   event: IngestionEvent,
@@ -192,6 +197,11 @@ async function handleObjectChanges(
       continue;
     }
 
+    if (isPdf(key)) {
+      documents.push(await ingestPdf(id, change.bucket, key, deps));
+      continue;
+    }
+
     const markdown = await deps.documents.read(change.bucket, key);
     const report = await ingestOne(toSourceDocument(id, key, markdown), deps);
     documents.push(report);
@@ -209,6 +219,10 @@ async function syncAllDocuments(deps: IngestionDeps): Promise<IngestionResult["d
   const results: IngestionResult["documents"][number][] = [];
 
   for (const key of keys) {
+    if (isPdf(key)) {
+      results.push(await ingestPdf(documentIdFromKey(key), deps.documentBucket, key, deps));
+      continue;
+    }
     const markdown = await deps.documents.read(deps.documentBucket, key);
     results.push(await ingestOne(toSourceDocument(documentIdFromKey(key), key, markdown), deps));
   }
@@ -269,6 +283,91 @@ async function ingestOne(
     action: report.skipped ? "skipped" : "indexed",
     chunks: report.chunksWritten,
   };
+}
+
+/**
+ * Ingest a merchant-uploaded PDF: extract its text, classify it, then hand the
+ * result to the SAME chunk/embed pipeline every other document already goes
+ * through. `ingestOne` below is untouched by any of this — a PDF just becomes
+ * another way to produce a `SourceDocument`.
+ *
+ * ⚠️ NEVER THROWS. Every other path in this file lets an error propagate,
+ * because a bad markdown file is a developer mistake caught in code review, not
+ * something happening live. A PDF upload is different: it is USER input,
+ * arriving from a merchant who is looking at an admin page waiting for a
+ * result. One bad PDF must not take down a whole scheduled sync — the batch
+ * loops in `handleObjectChanges` and `syncAllDocuments` both call this in a
+ * plain `for` loop with no surrounding try/catch, so the catch has to live
+ * here or one failure silently stops every document after it in the batch.
+ */
+async function ingestPdf(
+  id: string,
+  bucket: string,
+  key: string,
+  deps: IngestionDeps,
+): Promise<IngestionResult["documents"][number]> {
+  try {
+    const bytes = await deps.documents.readBytes(bucket, key);
+    // Hashed from the ORIGINAL PDF BYTES — not the extracted text, not the
+    // classified markdown. Both of those can change for reasons that have
+    // nothing to do with the document itself changing: a library upgrade
+    // reflowing whitespace, a prompt tweak that detects one more heading.
+    // Hashing either would trigger a needless re-embed with no real change
+    // behind it. The bytes are the only thing that is genuinely this document.
+    const version = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+
+    // ⚠️ CHECKED BEFORE EXTRACTION, NOT AFTER. Markdown documents get this
+    // skip for free — computing their version costs nothing extra because the
+    // text is already in hand. A PDF's cheap-to-read bytes are ALSO already in
+    // hand at this point, so checking now means an unchanged PDF costs one S3
+    // read and nothing else: no extraction, and critically no Bedrock
+    // classification call. Deferring this check to ingestOne (as the markdown
+    // path effectively does) would re-pay a Bedrock call on every scheduled
+    // resync for every PDF nobody touched — a real, recurring cost a markdown
+    // file never has to pay.
+    if ((await deps.state.getDocumentVersion(id)) === version) {
+      return { documentId: id, action: "skipped", chunks: 0 };
+    }
+
+    const rawText = await deps.pdfExtractor.extractText(bytes);
+    const classification = await classifyDocument(rawText, { llm: deps.llm });
+
+    const document: SourceDocument = {
+      id: DocumentId(id),
+      title: classification.title,
+      docType: classification.docType,
+      markdown: classification.markdown,
+      version,
+    };
+
+    const report = await ingestOne(document, deps);
+
+    // Only after ingestOne's own version-tracking write has succeeded — a
+    // merchant seeing "Ready" on the admin page should mean the document is
+    // genuinely searchable, not merely that classification finished.
+    await deps.state.recordUploadReady({
+      documentId: id,
+      title: classification.title,
+      docType: classification.docType,
+    });
+
+    // classification.unmatchedHeadings is deliberately not surfaced further
+    // than this yet — it degrades to slightly coarser chunking, not a failure,
+    // and there is no warnings channel reaching this function today. Worth
+    // wiring up if a pattern of unmatched headings ever shows up in practice.
+
+    return report;
+  } catch (cause) {
+    // Not distinguishing "the PDF was bad" from "Pinecone was down" here. Both
+    // reach the merchant as this message verbatim — a known simplification, not
+    // an oversight: an authenticated merchant looking at their own admin page is
+    // not the audience the causeMessage-folding elsewhere in this codebase was
+    // built to protect against, and "something failed, try again or contact
+    // support" is still actionable even when the specific cause is not.
+    const errorMessage = cause instanceof Error ? cause.message : String(cause);
+    await deps.state.recordUploadFailed({ documentId: id, errorMessage });
+    return { documentId: id, action: "failed", chunks: 0 };
+  }
 }
 
 function toSourceDocument(id: string, key: string, markdown: string): SourceDocument {

@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ProductId } from "@nailzify/core";
-import type { Embedder, Page, Product, ProductCatalog, VectorStore } from "@nailzify/core";
+import type {
+  Embedder,
+  LlmClient,
+  Page,
+  PdfExtractor,
+  Product,
+  ProductCatalog,
+  VectorStore,
+} from "@nailzify/core";
 import { handleIngestion, type IngestionEvent } from "./handler.js";
 import type { DocumentSource, IngestionDeps } from "./composition-root.js";
 
@@ -22,14 +30,27 @@ function deps(over: {
   documentVersions?: Record<string, string>;
   indexedProducts?: string[];
   warnings?: string[];
+  // ---- PDF path -----------------------------------------------------------
+  /** PDF keys and the bytes `readBytes` returns for them. */
+  pdfFiles?: Record<string, Uint8Array>;
+  /** What the fake PDF extractor returns for ANY pdf, unless it should throw. */
+  extractedText?: string;
+  extractThrows?: Error;
+  /** Scripts the fake LLM's classify_document tool call. */
+  llmToolCall?: { title?: string; docType?: string; sectionHeadings?: string[] };
+  llmThrows?: Error;
 } = {}) {
   const files = over.files ?? { "raw/return-policy.md": POLICY };
+  const pdfFiles = over.pdfFiles ?? {};
   const documentVersions: Record<string, string> = { ...over.documentVersions };
   let indexedProducts = [...(over.indexedProducts ?? [])];
 
   const upserted: string[] = [];
   const deletedDocuments: string[] = [];
   const readKeys: string[] = [];
+  const readBytesKeys: string[] = [];
+  const uploadReadyCalls: { documentId: string; title: string; docType: string }[] = [];
+  const uploadFailedCalls: { documentId: string; errorMessage: string }[] = [];
 
   const vectors: VectorStore = {
     upsert: async (_ns, records) => {
@@ -57,12 +78,54 @@ function deps(over: {
   };
 
   const documents: DocumentSource = {
-    list: async () => Object.keys(files),
+    list: async () => [...Object.keys(files), ...Object.keys(pdfFiles)],
     read: async (_bucket, key) => {
       readKeys.push(key);
       const content = files[key];
       if (content === undefined) throw new Error(`NoSuchKey: ${key}`);
       return content;
+    },
+    readBytes: async (_bucket, key) => {
+      readBytesKeys.push(key);
+      const bytes = pdfFiles[key];
+      if (bytes === undefined) throw new Error(`NoSuchKey: ${key}`);
+      return bytes;
+    },
+  };
+
+  let extractCalls = 0;
+  const pdfExtractor: PdfExtractor = {
+    extractText: async () => {
+      extractCalls += 1;
+      if (over.extractThrows) throw over.extractThrows;
+      return over.extractedText ?? "Sample Policy\n\nSome extracted PDF text.";
+    },
+  };
+
+  let llmCalls = 0;
+  const llm: LlmClient = {
+    complete: async () => {
+      llmCalls += 1;
+      if (over.llmThrows) throw over.llmThrows;
+      return {
+        text: "",
+        toolCalls: [
+          {
+            id: "t1",
+            name: "classify_document",
+            input: {
+              title: over.llmToolCall?.title ?? "Uploaded Document",
+              docType: over.llmToolCall?.docType ?? "guide",
+              sectionHeadings: over.llmToolCall?.sectionHeadings ?? [],
+            },
+          },
+        ],
+        stopReason: "tool_use",
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0 },
+      };
+    },
+    stream: async function* () {
+      throw new Error("ingestPdf should use complete(), never stream()");
     },
   };
 
@@ -72,6 +135,8 @@ function deps(over: {
     catalog,
     documents,
     documentBucket: "docs-bucket",
+    llm,
+    pdfExtractor,
     state: {
       getDocumentVersion: async (id) => documentVersions[id] ?? null,
       putDocumentVersion: async (id, version) => {
@@ -85,19 +150,34 @@ function deps(over: {
       replaceIndexedProducts: async (ids) => {
         indexedProducts = [...ids];
       },
-      // Admin-PDF-upload tracking. Not exercised by these tests yet — the
-      // ingestion handler doesn't call these until the PDF path is wired up —
-      // present only so this fake satisfies the interface.
+      // Admin-PDF-upload tracking. recordUploadStarted is not exercised here —
+      // it is called by the upload endpoint, not the ingestion Lambda — but
+      // recordUploadReady/Failed ARE, by ingestPdf, and now actually record.
       recordUploadStarted: async () => {},
-      recordUploadReady: async () => {},
-      recordUploadFailed: async () => {},
+      recordUploadReady: async ({ documentId, title, docType }) => {
+        uploadReadyCalls.push({ documentId, title, docType });
+      },
+      recordUploadFailed: async ({ documentId, errorMessage }) => {
+        uploadFailedCalls.push({ documentId, errorMessage });
+      },
       deleteUploadRecord: async () => {},
       listUploadedDocuments: async () => [],
     },
     drainWarnings: () => over.warnings ?? [],
   };
 
-  return { deps: built, upserted, deletedDocuments, readKeys, documentVersions };
+  return {
+    deps: built,
+    upserted,
+    deletedDocuments,
+    readKeys,
+    readBytesKeys,
+    documentVersions,
+    uploadReadyCalls,
+    uploadFailedCalls,
+    extractCalls: () => extractCalls,
+    llmCalls: () => llmCalls,
+  };
 }
 
 const s3Event = (eventName: string, key: string): IngestionEvent => ({
@@ -176,19 +256,20 @@ describe("deleting a document", () => {
 
 describe("choosing what to ingest", () => {
   it("ignores a file type it cannot read, with a warning", async () => {
-    // The PDFs in data/documents/pdf are GENERATED from the markdown beside
-    // them. Ingesting one would extract text from a file we produced from text
-    // we already have — a lossy round trip for no gain.
+    // PDF used to be this test's example and no longer is — it is a supported
+    // ingestible type now (see the "admin-uploaded PDFs" tests below). A
+    // genuinely unsupported type, like an image, still hits this path.
     const d = deps({ files: {} });
 
     const result = await handleIngestion(
-      s3Event("ObjectCreated:Put", "raw/nailzify-size-guide.pdf"),
+      s3Event("ObjectCreated:Put", "raw/team-photo.png"),
       d.deps,
     );
 
     expect(result.documents).toEqual([]);
     expect(result.warnings.some((w) => w.includes("not an ingestible"))).toBe(true);
     expect(d.readKeys).toEqual([]);
+    expect(d.readBytesKeys).toEqual([]);
   });
 
   it("skips a document whose content has not changed", async () => {
@@ -341,5 +422,176 @@ describe("EventBridge delivery", () => {
 
     // A products sync must not run just because a document changed.
     expect(result.products).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The admin-uploaded PDF path — extract, classify, ingest, record status.
+// Faked only at the true boundaries (PDF bytes in, LLM tool call out);
+// classifyDocument itself is the REAL function, not mocked, so this is an
+// integration test of ingestPdf + the already-tested classification logic.
+// ---------------------------------------------------------------------------
+
+const PDF_BYTES = new TextEncoder().encode("%PDF-1.4 fake bytes for a test fixture");
+
+describe("admin-uploaded PDFs", () => {
+  it("extracts, classifies and ingests a PDF through the same pipeline as markdown", async () => {
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/shipping-policy-ab12.pdf": PDF_BYTES },
+      extractedText: "Shipping Policy\n\nWe ship worldwide within 5 business days.",
+      llmToolCall: { title: "Shipping Policy", docType: "policy", sectionHeadings: [] },
+    });
+
+    const result = await handleIngestion(
+      ebEvent("Object Created", "raw/uploads/shipping-policy-ab12.pdf"),
+      d.deps,
+    );
+
+    expect(result.documents[0]).toMatchObject({
+      documentId: "shipping-policy-ab12",
+      action: "indexed",
+    });
+    expect(d.upserted.length).toBeGreaterThan(0);
+  });
+
+  it("reads bytes for a PDF, never decodes it as UTF-8 text", async () => {
+    // The bug this guards: calling documents.read() (text) on a PDF corrupts
+    // the binary content before extraction ever sees it.
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/doc.pdf": PDF_BYTES },
+    });
+
+    await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), d.deps);
+
+    expect(d.readBytesKeys).toEqual(["raw/uploads/doc.pdf"]);
+    expect(d.readKeys).toEqual([]);
+  });
+
+  it("records the upload as ready with the classified title and category", async () => {
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/nail-care-guide.pdf": PDF_BYTES },
+      llmToolCall: { title: "Nail Care Guide", docType: "guide", sectionHeadings: [] },
+    });
+
+    await handleIngestion(ebEvent("Object Created", "raw/uploads/nail-care-guide.pdf"), d.deps);
+
+    expect(d.uploadReadyCalls).toEqual([
+      { documentId: "nail-care-guide", title: "Nail Care Guide", docType: "guide" },
+    ]);
+  });
+
+  it("records failure and reports 'failed' rather than throwing, when the PDF has no text layer", async () => {
+    // A scanned PDF. One bad upload must not take down a batch sync, and the
+    // merchant needs to see WHY on the admin page, not silence.
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/scanned.pdf": PDF_BYTES },
+      extractThrows: Object.assign(new Error("no extractable text"), {
+        name: "PdfHasNoExtractableTextError",
+      }),
+    });
+
+    const result = await handleIngestion(ebEvent("Object Created", "raw/uploads/scanned.pdf"), d.deps);
+
+    expect(result.documents[0]).toMatchObject({ documentId: "scanned", action: "failed", chunks: 0 });
+    expect(d.uploadFailedCalls).toEqual([
+      { documentId: "scanned", errorMessage: "no extractable text" },
+    ]);
+    // Nothing was written to the vector store for a document that failed.
+    expect(d.upserted).toEqual([]);
+  });
+
+  it("records failure when classification fails, without crashing the run", async () => {
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/weird.pdf": PDF_BYTES },
+      llmThrows: new Error("Bedrock throttled"),
+    });
+
+    const result = await handleIngestion(ebEvent("Object Created", "raw/uploads/weird.pdf"), d.deps);
+
+    expect(result.documents[0]?.action).toBe("failed");
+    expect(d.uploadFailedCalls[0]?.errorMessage).toContain("Bedrock throttled");
+  });
+
+  it("does not fail unrelated documents in the same batch when one PDF fails", async () => {
+    const d = deps({
+      files: { "raw/return-policy.md": POLICY },
+      pdfFiles: { "raw/uploads/broken.pdf": PDF_BYTES },
+      extractThrows: new Error("corrupt PDF"),
+    });
+
+    const result = await handleIngestion({ mode: "documents" }, d.deps);
+
+    const byId = Object.fromEntries(result.documents.map((r) => [r.documentId, r.action]));
+    expect(byId["broken"]).toBe("failed");
+    expect(byId["return-policy"]).toBe("indexed");
+  });
+
+  it("hashes the version from the PDF bytes, not the extracted or classified text", async () => {
+    // Re-uploading identical bytes must skip, even if a prompt change alters
+    // what the model detects as headings on a re-run — hashing the classified
+    // markdown instead would cause a needless re-embed with no real change.
+    const first = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/doc.pdf": PDF_BYTES },
+      llmToolCall: { title: "x", docType: "guide", sectionHeadings: [] },
+    });
+    await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), first.deps);
+    const version = first.documentVersions["doc"];
+
+    const second = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/doc.pdf": PDF_BYTES },
+      documentVersions: { doc: version! },
+      // A DIFFERENT classification result for identical bytes — as a prompt
+      // change over time might produce.
+      llmToolCall: { title: "A Different Title", docType: "faq", sectionHeadings: ["x"] },
+    });
+    const result = await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), second.deps);
+
+    expect(result.documents[0]?.action).toBe("skipped");
+  });
+
+  it("skips extraction and classification entirely for an unchanged PDF", async () => {
+    // THE COST GUARD. Without this, every scheduled resync re-pays a Bedrock
+    // classification call for every PDF nobody touched — a markdown file never
+    // has to pay this, and a PDF should not either.
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/doc.pdf": PDF_BYTES },
+    });
+    await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), d.deps);
+    const version = d.documentVersions["doc"];
+
+    const second = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/doc.pdf": PDF_BYTES },
+      documentVersions: { doc: version! },
+    });
+
+    const result = await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), second.deps);
+
+    expect(result.documents[0]?.action).toBe("skipped");
+    expect(second.extractCalls()).toBe(0);
+    expect(second.llmCalls()).toBe(0);
+    expect(second.uploadReadyCalls).toEqual([]);
+  });
+
+  it("does re-extract and re-classify when the bytes genuinely changed", async () => {
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/doc.pdf": PDF_BYTES },
+      documentVersions: { doc: "a-completely-different-version" },
+    });
+
+    const result = await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), d.deps);
+
+    expect(result.documents[0]?.action).toBe("indexed");
+    expect(d.extractCalls()).toBe(1);
+    expect(d.llmCalls()).toBe(1);
   });
 });

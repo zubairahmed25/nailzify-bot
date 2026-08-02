@@ -87,6 +87,8 @@ const ingestion = new IngestionStack(app, `Nailzify-${envName}-Ingestion`, {
   pineconeIndex: config.pineconeIndex,
   shopifyApiVersion: config.shopifyApiVersion,
   embedModelId: config.embedModelId,
+  chatModelId: config.chatModelId,
+  fastModelId: config.fastModelId,
 });
 
 // No explicit dependency call. The API stack references the Data stack's table

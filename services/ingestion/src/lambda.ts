@@ -60,6 +60,10 @@ async function loadConfig(): Promise<IngestionConfig> {
     storefrontDomain: required("STOREFRONT_DOMAIN"),
     storefrontToken,
     shopifyApiVersion: required("SHOPIFY_API_VERSION"),
+    // Same env var names the chat Lambda already uses — same model ids, same
+    // meaning, one less thing to keep in sync by hand across two Lambdas.
+    chatModelId: required("CHAT_MODEL_ID"),
+    fastModelId: required("FAST_MODEL_ID"),
   };
 }
 

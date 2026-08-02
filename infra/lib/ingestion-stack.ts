@@ -62,6 +62,15 @@ export interface IngestionStackProps extends cdk.StackProps {
   readonly pineconeIndex: string;
   readonly shopifyApiVersion: string;
   readonly embedModelId: string;
+  /**
+   * Same model ids the chat Lambda uses, granted here for a different reason:
+   * classifying an admin-uploaded PDF (title, category, section headings)
+   * before it enters the same chunk/embed pipeline every other document goes
+   * through. See services/ingestion/src/composition-root.ts for why `judge`
+   * needs no separate id — it already equals `chat` in both model maps.
+   */
+  readonly chatModelId: string;
+  readonly fastModelId: string;
 }
 
 /**
@@ -152,6 +161,8 @@ export class IngestionStack extends cdk.Stack {
         PINECONE_INDEX: props.pineconeIndex,
         PINECONE_SECRET_ARN: props.pineconeSecret.secretArn,
         STOREFRONT_SECRET_ARN: props.storefrontSecret.secretArn,
+        CHAT_MODEL_ID: props.chatModelId,
+        FAST_MODEL_ID: props.fastModelId,
       },
 
       tracing: lambda.Tracing.ACTIVE,
@@ -172,14 +183,28 @@ export class IngestionStack extends cdk.Stack {
     // policy is a much worse failure than one that cannot index it.
     documentsBucket.grantRead(ingestFn);
 
-    // Embedding only. No chat model, no streaming action — this function has no
-    // reason to invoke a generative model, and IAM is where that is enforced
-    // rather than by nobody having written the code yet.
+    // ⚠️ NO LONGER "EMBEDDING ONLY" — that was true until PDF classification
+    // needed a real generative call. Still deliberately narrow: InvokeModel
+    // only, never InvokeModelWithResponseStream — this function classifies a
+    // document once and returns, it never streams a customer-facing answer,
+    // and the chat Lambda's grant is what covers that action.
+    //
+    // The chat-model grant needs BOTH ARN forms, same as the chat Lambda: the
+    // inference-profile ARN (what the code actually calls) and the underlying
+    // foundation-model ARN (what Bedrock checks permissions against under the
+    // hood). Missing either one is a ValidationException that does not say
+    // which permission is missing.
+    const classifyModelArns = [
+      `arn:aws:bedrock:*:${this.account}:inference-profile/${props.chatModelId}`,
+      `arn:aws:bedrock:*::foundation-model/${props.chatModelId.replace(/^(us|global)\./, "")}`,
+    ];
+
     ingestFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["bedrock:InvokeModel"],
         resources: [
           `arn:aws:bedrock:*::foundation-model/${props.embedModelId.replace(/^(us|global)\./, "")}`,
+          ...classifyModelArns,
         ],
       }),
     );

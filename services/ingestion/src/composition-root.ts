@@ -15,18 +15,29 @@ import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/clien
 import {
   EMBEDDING_MODEL,
   createBedrockEmbedder,
+  createBedrockLlmClient,
   createIngestionStateStore,
+  createPdfExtractor,
   createPineconeVectorStore,
   createShopifyProductCatalog,
   createStorefrontClient,
   type IngestionStateStore,
 } from "@nailzify/adapters";
-import type { Embedder, ProductCatalog, VectorStore } from "@nailzify/core";
+import type { Embedder, LlmClient, PdfExtractor, ProductCatalog, VectorStore } from "@nailzify/core";
 
 export interface DocumentSource {
   /** Every ingestible key under the configured prefix. */
   list(): Promise<readonly string[]>;
+  /** Text files (markdown, txt) — decoded as UTF-8. */
   read(bucket: string, key: string): Promise<string>;
+  /**
+   * Binary files (PDF) — the raw bytes, undecoded.
+   *
+   * A separate method rather than an option on `read()` because decoding a PDF
+   * as UTF-8 text corrupts it — this is not "the same operation with a flag",
+   * it is a different operation that happens to share a bucket.
+   */
+  readBytes(bucket: string, key: string): Promise<Uint8Array>;
 }
 
 export interface IngestionDeps {
@@ -36,6 +47,9 @@ export interface IngestionDeps {
   readonly state: IngestionStateStore;
   readonly documents: DocumentSource;
   readonly documentBucket: string;
+  /** Classifies an uploaded PDF's title, category and section headings. */
+  readonly llm: LlmClient;
+  readonly pdfExtractor: PdfExtractor;
   /**
    * Merchandising warnings collected during this invocation.
    *
@@ -59,6 +73,15 @@ export interface IngestionConfig {
   readonly storefrontDomain: string;
   readonly storefrontToken: string;
   readonly shopifyApiVersion: string;
+  /**
+   * Same model IDs the chat Lambda uses — `judge` resolves to the same model as
+   * `chat` in both DEFAULT_MODELS and FALLBACK_MODELS today, so there is no
+   * separate "judge model" config to invent. This Lambda only ever requests
+   * `model: "judge"` (document classification); `chat` and `fast` are supplied
+   * purely because ModelRoleMap requires the full shape.
+   */
+  readonly chatModelId: string;
+  readonly fastModelId: string;
   readonly s3?: S3Client;
 }
 
@@ -118,6 +141,12 @@ export function buildIngestionDeps(config: IngestionConfig): IngestionDeps {
       if (!result.Body) throw new Error(`S3 object ${bucket}/${key} returned no body.`);
       return result.Body.transformToString("utf-8");
     },
+
+    async readBytes(bucket, key) {
+      const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      if (!result.Body) throw new Error(`S3 object ${bucket}/${key} returned no body.`);
+      return result.Body.transformToByteArray();
+    },
   };
 
   return {
@@ -130,6 +159,14 @@ export function buildIngestionDeps(config: IngestionConfig): IngestionDeps {
       indexName: config.pineconeIndex,
     }),
     state: createIngestionStateStore({ tableName: config.tableName }),
+    // See the note on IngestionConfig.chatModelId — judge deliberately mirrors
+    // chat, since that is the same equivalence the chat Lambda's own model maps
+    // already encode.
+    llm: createBedrockLlmClient({
+      region: config.region,
+      models: { chat: config.chatModelId, fast: config.fastModelId, judge: config.chatModelId },
+    }),
+    pdfExtractor: createPdfExtractor(),
     drainWarnings() {
       const collected = warnings;
       warnings = [];
