@@ -68,6 +68,24 @@ export function savePersistedState(state: PersistedState): void {
   }
 }
 
+/**
+ * Mark the panel closed without touching the conversation.
+ *
+ * ⚠️ WHY A SEPARATE FUNCTION INSTEAD OF setOpen(false) IN REACT. Clicking a
+ * product card is a real `<a href>` — the browser starts navigating to a new
+ * page as soon as the click handler returns. React state updates are batched
+ * and applied on the NEXT render, which may never happen: the page can already
+ * be gone by then. This writes to sessionStorage directly and synchronously,
+ * so it is guaranteed to land before the browser unloads the page.
+ *
+ * Reads the current persisted state first rather than taking `messages` as a
+ * parameter, so a component that only knows about ONE product (ProductCard has
+ * no view of the whole conversation) can still flip this one field correctly.
+ */
+export function setPersistedOpen(open: boolean): void {
+  savePersistedState({ ...loadPersistedState(), open });
+}
+
 export type Status = "idle" | "thinking" | "streaming" | "error";
 
 export function newId(): string {

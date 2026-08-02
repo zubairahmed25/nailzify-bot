@@ -17,7 +17,9 @@
       "Bash(node -e \"const p=require\\('./package.json'\\);console.log\\(JSON.stringify\\({d:p.dependencies,dd:p.devDependencies},null,1\\)\\)\")",
       "Bash(npx cdk *)",
       "Bash(npm test *)",
-      "WebFetch(domain:docs.pinecone.io)"
+      "WebFetch(domain:docs.pinecone.io)",
+      "Bash(nohup python3 -m http.server 8934)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8934/a.html)"
     ]
   }
 }

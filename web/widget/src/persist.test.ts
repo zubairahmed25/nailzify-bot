@@ -8,7 +8,7 @@ vi.stubGlobal("sessionStorage", {
   removeItem: (k: string) => void store.delete(k),
 });
 
-const { loadPersistedState, savePersistedState } = await import(
+const { loadPersistedState, savePersistedState, setPersistedOpen } = await import(
   "/Users/zubair/Desktop/nailzify-bot/web/widget/src/persistence.js"
 );
 
@@ -53,6 +53,25 @@ describe("conversation survives a page navigation", () => {
     const restored = loadPersistedState();
     expect(restored.messages).toHaveLength(30);
     expect(restored.messages[restored.messages.length - 1]!.id).toBe("49");
+  });
+
+  it("setPersistedOpen closes the panel without touching the conversation", () => {
+    // THE PRODUCT-CARD BUG. A card is a real <a href> — the browser starts
+    // navigating as soon as the click handler returns. Setting React state
+    // (setOpen(false)) is batched onto the NEXT render, which may never happen
+    // because the page is already gone. This has to write synchronously.
+    savePersistedState({ open: true, messages: [msg("a"), msg("b")] });
+
+    setPersistedOpen(false);
+
+    const restored = loadPersistedState();
+    expect(restored.open).toBe(false);
+    expect(restored.messages.map((m) => m.id)).toEqual(["a", "b"]);
+  });
+
+  it("setPersistedOpen works even when nothing was stored yet", () => {
+    setPersistedOpen(false);
+    expect(loadPersistedState()).toEqual({ open: false, messages: [] });
   });
 
   it("survives sessionStorage throwing", () => {
