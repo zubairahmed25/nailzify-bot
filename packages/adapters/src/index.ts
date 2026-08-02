@@ -54,3 +54,4 @@ export {
   type CachingSecretsProvider,
   type SecretsProviderConfig,
 } from "./aws/secrets.js";
+export { createPdfExtractor, isLikelyScanned } from "./pdf/extractor.js";

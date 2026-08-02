@@ -130,6 +130,32 @@ describe("model routing", () => {
   });
 });
 
+describe("forceTool", () => {
+  it("translates a tool name into a tool_choice forcing that tool", async () => {
+    // Verified against the installed SDK's own types before writing this: the
+    // Bedrock client's `.messages` is the SAME resource class the direct API
+    // uses, so tool_choice works identically over both transports.
+    const { llm, sent } = make({});
+
+    await llm.complete({ ...baseRequest, forceTool: "classify_document" });
+
+    expect((sent() as unknown as { tool_choice?: unknown }).tool_choice).toEqual({
+      type: "tool",
+      name: "classify_document",
+    });
+  });
+
+  it("sends no tool_choice at all when forceTool is not set", async () => {
+    // The customer-facing tool loop relies on this — the model choosing whether
+    // to search is the entire point there.
+    const { llm, sent } = make({});
+
+    await llm.complete(baseRequest);
+
+    expect(sent()).not.toHaveProperty("tool_choice");
+  });
+});
+
 describe("prompt caching", () => {
   it("marks the system prompt as a cacheable prefix when asked", async () => {
     const { llm, sent } = make({});

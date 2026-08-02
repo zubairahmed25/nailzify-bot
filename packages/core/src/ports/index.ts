@@ -93,6 +93,17 @@ export interface LlmRequest {
   readonly cacheSystemPrompt?: boolean;
   /** Thinking depth / token spend. Sweep it per route against your eval set. */
   readonly effort?: "low" | "medium" | "high";
+  /**
+   * Force a specific tool to be called, instead of letting the model decide.
+   *
+   * The customer-facing tool loop never sets this — the model choosing whether
+   * to search is the whole point there. It exists for a one-shot, non-
+   * conversational call that needs STRUCTURED output every time, such as
+   * classifying an uploaded document: offering a tool and hoping the model
+   * calls it is "usually," and this codebase does not ship on "usually" when a
+   * typed alternative exists.
+   */
+  readonly forceTool?: string;
 }
 
 export type LlmStreamEvent =
@@ -291,6 +302,23 @@ export interface ConversationRepository {
 export interface KnowledgeRepository {
   putChunks(chunks: readonly Chunk[]): Promise<void>;
   getChunks(ids: readonly ChunkId[]): Promise<readonly Chunk[]>;
+}
+
+// ===========================================================================
+// PDF extraction (ingestion side)
+// ===========================================================================
+
+export interface PdfExtractor {
+  /**
+   * Pull the text out of a PDF's pages, in reading order.
+   *
+   * Throws `PdfHasNoExtractableTextError` (domain/shared/errors.js) rather than
+   * returning an empty or near-empty string. A document that "ingested
+   * successfully" with nothing useful in it is a worse failure than a loud
+   * rejection at upload time — it looks fine in every log and simply never
+   * answers anything.
+   */
+  extractText(bytes: Uint8Array): Promise<string>;
 }
 
 // ===========================================================================

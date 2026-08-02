@@ -39,6 +39,7 @@ export * from "./application/tool-registry.js";
 export * from "./application/handle-message.js";
 export * from "./application/ingest-knowledge.js";
 export * from "./application/ingest-products.js";
+export * from "./application/classify-document.js";
 
 // ---- ports ----
 export * from "./ports/index.js";

@@ -152,3 +152,29 @@ export class RepositoryCorruption extends InfrastructureError {
   readonly code = "REPOSITORY_CORRUPTION";
   readonly retryable = false;
 }
+
+/**
+ * A PDF yielded too little text to be worth indexing.
+ *
+ * Not retryable — the same bytes will produce the same near-empty extraction
+ * every time. Distinct from every other error in this file, which describes a
+ * dependency (Bedrock, Pinecone, Shopify) failing; this describes the INPUT
+ * itself being unusable, most commonly a scanned image with no embedded text
+ * layer. This pipeline reads text directly and does not run OCR.
+ */
+export class PdfHasNoExtractableTextError extends InfrastructureError {
+  readonly code = "PDF_HAS_NO_EXTRACTABLE_TEXT";
+  readonly retryable = false;
+
+  constructor(
+    readonly totalPages: number,
+    readonly extractedChars: number,
+  ) {
+    super(
+      `Extracted only ${extractedChars} characters from a ${totalPages}-page PDF. ` +
+        `This usually means the PDF is a scanned image with no embedded text layer. ` +
+        `Re-export the document from its source (Word, Google Docs) as a text-based ` +
+        `PDF rather than a scan, then upload again.`,
+    );
+  }
+}

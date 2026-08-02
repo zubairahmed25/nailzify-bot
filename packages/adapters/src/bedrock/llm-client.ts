@@ -140,6 +140,16 @@ export function createBedrockLlmClient(config: BedrockLlmConfig): LlmClient {
         ]
       : request.system,
     ...(request.tools ? { tools: request.tools.map(toAnthropicTool) } : {}),
+    // ⚠️ VERIFIED AGAINST THE INSTALLED SDK'S TYPES, NOT ASSUMED. AnthropicBedrock's
+    // `.messages` is `Omit<Resources.Messages, 'batches' | 'countTokens'>` — the
+    // exact same resource class the direct API client uses, just over a different
+    // transport. `tool_choice: { type: "tool", name }` forces that one tool to be
+    // called instead of leaving it optional, which is what a one-shot structured-
+    // output call (document classification) needs and the customer-facing tool
+    // loop never sets.
+    ...(request.forceTool
+      ? { tool_choice: { type: "tool" as const, name: request.forceTool } }
+      : {}),
     messages: request.messages.map(toAnthropicMessage),
   });
 
