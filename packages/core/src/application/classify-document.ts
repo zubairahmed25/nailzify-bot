@@ -45,7 +45,7 @@ const KNOWN_DOC_TYPES: readonly DocType[] = ["policy", "guide", "faq"];
 
 const SYSTEM_PROMPT = `You are classifying a company document for a retail chatbot's knowledge base. Read the text and call ${TOOL_NAME} with:
 
-- title: a short, clear title for the document, drawn from its content. Never use a filename — you were not given one.
+- title: a short, clear title for the document, drawn from its content. Never use a filename — you were not given one. This applies even to a very short document — a single sentence still has a subject; summarize what it is about in a few words (e.g. a one-line note about who owns the store becomes something like "Store Ownership", not a placeholder). Never output something like "Unknown", "N/A", or "<UNKNOWN>" — always give your best genuine, specific title.
 - docType: "policy" for return, shipping, warranty or legal terms; "faq" for a question-and-answer format document; "guide" for anything else (how-to, product care, sizing, general information).
 - sectionHeadings: the lines in the text that are genuine section headings, copied EXACTLY character-for-character as they appear in the source — so they can be found again by an exact string match. Do not paraphrase, summarize, or fix typos in a heading. Do not include the document's own title, page numbers, addresses, or a source/attribution line (e.g. "Source: https://..."). Only include lines that clearly introduce a new section of content. If the document has no clear section breaks, return an empty list — do not invent structure that is not there.`;
 
