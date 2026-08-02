@@ -64,6 +64,7 @@ function deps(options: DepsOptions = {}) {
         recordUploadStartedCalls.push(input);
       },
       async recordUploadReady() {},
+      async recordUploadUnchanged() {},
       async recordUploadFailed() {},
       async deleteUploadRecord(documentId) {
         deleteUploadRecordCalls.push(documentId);

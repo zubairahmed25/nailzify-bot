@@ -105,6 +105,18 @@ export interface IngestionStateStore {
   }): Promise<void>;
 
   /**
+   * The ingestion Lambda calls this when a re-uploaded file's content hash
+   * matches what's already indexed — the classification skip path in
+   * services/ingestion/src/handler.ts's `ingestPdf`, which deliberately never
+   * re-runs Claude for content it has already seen. That path has no fresh
+   * title/docType to report, but `recordUploadStarted` no longer clobbers the
+   * existing ones (see its own doc comment), so there is nothing to WRITE
+   * here except flipping status back — the title/docType already sitting in
+   * the row are still correct.
+   */
+  recordUploadUnchanged(documentId: string): Promise<void>;
+
+  /**
    * The ingestion Lambda calls this if any step failed. `errorMessage` reaches
    * the admin page verbatim, so keep it something a merchant can act on
    * ("couldn't read any text from this PDF — is it a scanned image?") rather
@@ -233,11 +245,33 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
     async recordUploadStarted({ documentId, s3Key }) {
       const now = new Date().toISOString();
       await client.send(
-        new PutCommand({
+        new UpdateCommand({
           TableName: config.tableName,
-          Item: {
-            PK: UPLOAD_PK,
-            SK: documentId,
+          Key: { PK: UPLOAD_PK, SK: documentId },
+          // ⚠️ UpdateCommand, NOT PutCommand — deliberately, after a live bug.
+          // Re-uploading a file with the SAME content (a merchant re-selecting
+          // the identical PDF, or just retrying) hashes to a version the
+          // ingestion Lambda has already indexed, so it takes the cheap "skip,
+          // nothing changed" path (services/ingestion/src/handler.ts) rather
+          // than re-classifying. A PutCommand here would have already wiped
+          // title/docType to null the instant the merchant re-uploaded, and
+          // nothing on the skip path would ever set them again — the admin
+          // page would show a blank title for a document that was correctly
+          // indexed the whole time. `if_not_exists` means title/docType/
+          // errorMessage start null on a genuinely NEW document and are left
+          // completely alone on a re-upload; only status, s3Key and the
+          // timestamps ever change here.
+          UpdateExpression:
+            "SET #status = :status, s3Key = :s3Key, uploadedAt = :now, updatedAt = :now, " +
+            "GSI2PK = :pk, GSI2SK = :gsi2sk, " +
+            "title = if_not_exists(title, :null), " +
+            "docType = if_not_exists(docType, :null), " +
+            "errorMessage = if_not_exists(errorMessage, :null)",
+          ExpressionAttributeNames: { "#status": "status" },
+          ExpressionAttributeValues: {
+            ":status": "processing" satisfies UploadStatus,
+            ":s3Key": s3Key,
+            ":now": now,
             // Mirrored onto GSI2 — its OWN index, not GSI1, after discovering
             // live that DynamoDB cannot widen an existing GSI's projection
             // (infra/lib/data-stack.ts) — so the admin page can list uploads
@@ -247,15 +281,24 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
             // timestamp. Fine at "a company's own documents" scale (dozens to
             // low hundreds); a single hot partition would need revisiting long
             // before that, at a volume nothing here is designed for.
-            GSI2PK: UPLOAD_PK,
-            GSI2SK: `${now}#${documentId}`,
-            status: "processing" satisfies UploadStatus,
-            title: null,
-            docType: null,
-            errorMessage: null,
-            s3Key,
-            uploadedAt: now,
-            updatedAt: now,
+            ":pk": UPLOAD_PK,
+            ":gsi2sk": `${now}#${documentId}`,
+            ":null": null,
+          },
+        }),
+      );
+    },
+
+    async recordUploadUnchanged(documentId) {
+      await client.send(
+        new UpdateCommand({
+          TableName: config.tableName,
+          Key: { PK: UPLOAD_PK, SK: documentId },
+          UpdateExpression: "SET #status = :status, updatedAt = :now",
+          ExpressionAttributeNames: { "#status": "status" },
+          ExpressionAttributeValues: {
+            ":status": "ready" satisfies UploadStatus,
+            ":now": new Date().toISOString(),
           },
         }),
       );

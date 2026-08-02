@@ -36,34 +36,83 @@ const storeWith = (responses: Record<string, unknown> = {}) => {
 // ---------------------------------------------------------------------------
 
 describe("recordUploadStarted", () => {
-  it("writes a processing record with the GSI mirror for sorting", async () => {
+  it("is an UpdateCommand, never a PutCommand", async () => {
+    // ⚠️ THE REASON THIS IS AN UPDATE, NOT A PUT. A live bug: a merchant
+    // re-uploading unchanged content hits ingestPdf's cheap "skip, nothing
+    // changed" path (services/ingestion/src/handler.ts), which never
+    // re-classifies. A PutCommand here would have already wiped a correct
+    // title/docType to null the instant the re-upload started, and nothing
+    // on the skip path would ever set them again.
     const { store, find } = storeWith();
 
     await store.recordUploadStarted({ documentId: "doc-1", s3Key: "raw/uploads/doc-1.pdf" });
 
-    const put = find("PutCommand");
-    expect(put?.input.Item).toMatchObject({
-      PK: "INGEST#UPLOAD",
-      SK: "doc-1",
-      GSI2PK: "INGEST#UPLOAD",
-      status: "processing",
-      title: null,
-      docType: null,
-      errorMessage: null,
-      s3Key: "raw/uploads/doc-1.pdf",
+    expect(find("PutCommand")).toBeUndefined();
+    expect(find("UpdateCommand")).toBeDefined();
+  });
+
+  it("sets status, s3Key, timestamps and the GSI2 mirror unconditionally", async () => {
+    const { store, find } = storeWith();
+
+    await store.recordUploadStarted({ documentId: "doc-1", s3Key: "raw/uploads/doc-1.pdf" });
+
+    const update = find("UpdateCommand")!;
+    expect(update.input.Key).toEqual({ PK: "INGEST#UPLOAD", SK: "doc-1" });
+    expect(update.input.ExpressionAttributeValues).toMatchObject({
+      ":status": "processing",
+      ":s3Key": "raw/uploads/doc-1.pdf",
+      ":pk": "INGEST#UPLOAD",
     });
     // GSI2SK leads with the timestamp so a plain query sorts by upload time —
     // no separate sort step needed when listing.
-    expect(put?.input.Item.GSI2SK).toMatch(/^\d{4}-\d{2}-\d{2}T.*#doc-1$/);
+    expect(update.input.ExpressionAttributeValues[":gsi2sk"]).toMatch(
+      /^\d{4}-\d{2}-\d{2}T.*#doc-1$/,
+    );
   });
 
-  it("stamps uploadedAt and updatedAt identically on creation", async () => {
+  it("only initialises title, docType and errorMessage if_not_exists — never overwrites them", async () => {
+    // This is the actual fix: on a re-upload of unchanged content, a document
+    // already classified from a PRIOR successful run must keep that title and
+    // docType, not have them reset to null while ingestPdf's skip path leaves
+    // them that way forever.
     const { store, find } = storeWith();
 
     await store.recordUploadStarted({ documentId: "doc-1", s3Key: "raw/uploads/doc-1.pdf" });
 
-    const item = find("PutCommand")?.input.Item;
-    expect(item.uploadedAt).toBe(item.updatedAt);
+    const expr = find("UpdateCommand")!.input.UpdateExpression as string;
+    expect(expr).toMatch(/title = if_not_exists\(title, :null\)/);
+    expect(expr).toMatch(/docType = if_not_exists\(docType, :null\)/);
+    expect(expr).toMatch(/errorMessage = if_not_exists\(errorMessage, :null\)/);
+  });
+
+  it("stamps uploadedAt and updatedAt identically", async () => {
+    const { store, find } = storeWith();
+
+    await store.recordUploadStarted({ documentId: "doc-1", s3Key: "raw/uploads/doc-1.pdf" });
+
+    expect(find("UpdateCommand")!.input.ExpressionAttributeValues[":now"]).toBeDefined();
+    expect(find("UpdateCommand")!.input.UpdateExpression).toMatch(
+      /uploadedAt = :now, updatedAt = :now/,
+    );
+  });
+});
+
+describe("recordUploadUnchanged", () => {
+  it("flips status back to ready without touching title, docType or s3Key", async () => {
+    // The skip path's whole point: nothing was reclassified, so nothing about
+    // the document's identity should change — only its status, which
+    // recordUploadStarted (wrongly, before this fix) had reset to "processing".
+    const { store, find } = storeWith();
+
+    await store.recordUploadUnchanged("doc-1");
+
+    const update = find("UpdateCommand")!;
+    expect(update.input.Key).toEqual({ PK: "INGEST#UPLOAD", SK: "doc-1" });
+    expect(update.input.ExpressionAttributeValues).toEqual({
+      ":status": "ready",
+      ":now": expect.any(String),
+    });
+    expect(update.input.UpdateExpression).not.toMatch(/title|docType|s3Key|errorMessage/);
   });
 });
 

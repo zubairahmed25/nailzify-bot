@@ -51,6 +51,7 @@ function deps(over: {
   const readBytesKeys: string[] = [];
   const uploadReadyCalls: { documentId: string; title: string; docType: string }[] = [];
   const uploadFailedCalls: { documentId: string; errorMessage: string }[] = [];
+  const uploadUnchangedCalls: string[] = [];
 
   const vectors: VectorStore = {
     upsert: async (_ns, records) => {
@@ -160,6 +161,9 @@ function deps(over: {
       recordUploadFailed: async ({ documentId, errorMessage }) => {
         uploadFailedCalls.push({ documentId, errorMessage });
       },
+      recordUploadUnchanged: async (documentId) => {
+        uploadUnchangedCalls.push(documentId);
+      },
       deleteUploadRecord: async () => {},
       listUploadedDocuments: async () => [],
     },
@@ -175,6 +179,7 @@ function deps(over: {
     documentVersions,
     uploadReadyCalls,
     uploadFailedCalls,
+    uploadUnchangedCalls,
     extractCalls: () => extractCalls,
     llmCalls: () => llmCalls,
   };
@@ -579,6 +584,31 @@ describe("admin-uploaded PDFs", () => {
     expect(second.extractCalls()).toBe(0);
     expect(second.llmCalls()).toBe(0);
     expect(second.uploadReadyCalls).toEqual([]);
+  });
+
+  it("flips the upload record back to ready on a skip, without reclassifying", async () => {
+    // THE BUG THIS GUARDS AGAINST: recordUploadStarted (the upload endpoint)
+    // resets status to "processing" on every upload attempt, including a
+    // re-upload of unchanged content. Before this, nothing on the skip path
+    // ever told the upload record the document was still fine — a merchant
+    // re-selecting the same file left the admin page stuck on "Processing…"
+    // forever for a document that was correctly indexed the whole time.
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/doc.pdf": PDF_BYTES },
+    });
+    await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), d.deps);
+    const version = d.documentVersions["doc"];
+
+    const second = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/doc.pdf": PDF_BYTES },
+      documentVersions: { doc: version! },
+    });
+
+    await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), second.deps);
+
+    expect(second.uploadUnchangedCalls).toEqual(["doc"]);
   });
 
   it("does re-extract and re-classify when the bytes genuinely changed", async () => {

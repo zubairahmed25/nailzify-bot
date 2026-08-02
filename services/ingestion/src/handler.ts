@@ -326,6 +326,15 @@ async function ingestPdf(
     // resync for every PDF nobody touched — a real, recurring cost a markdown
     // file never has to pay.
     if ((await deps.state.getDocumentVersion(id)) === version) {
+      // Still needs telling to the UPLOAD record. This path skips
+      // classification entirely, so there is no fresh title/docType to
+      // report — but recordUploadStarted no longer clobbers the existing
+      // ones (packages/adapters/src/dynamodb/ingestion-state.ts), so there is
+      // nothing to overwrite, only a status to flip back. Without this call a
+      // re-upload of unchanged content — a merchant re-selecting the same
+      // file, or a retry — left the admin page showing "Processing…" forever
+      // for a document that was correctly indexed the whole time.
+      await deps.state.recordUploadUnchanged(id);
       return { documentId: id, action: "skipped", chunks: 0 };
     }
 
