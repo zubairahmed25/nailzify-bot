@@ -262,6 +262,16 @@ describe("applyRetrievalPolicy", () => {
       "Do not answer from general knowledge",
     );
   });
+
+  it("tells the model not to fall back on earlier turns in the conversation", () => {
+    // THE BUG THIS GUARDS AGAINST, live: a merchant deletes a document
+    // mid-conversation, the next search correctly comes back insufficient,
+    // and the model still answers from what an EARLIER search in the same
+    // conversation had returned — because nothing told it a past answer can
+    // go stale. A document can be edited or removed between turns; only the
+    // current search result is evidence of what is true now.
+    expect(describeOutcome(applyRetrievalPolicy([]))).toContain("earlier in this conversation");
+  });
 });
 
 describe("separate floors for separate score distributions", () => {

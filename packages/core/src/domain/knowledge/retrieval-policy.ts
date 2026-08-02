@@ -250,7 +250,10 @@ export function describeOutcome(outcome: RetrievalOutcome): string {
       return (
         "No sufficiently relevant source was found in the Nailzify documentation. " +
         "Tell the customer you don't have that information and offer to connect " +
-        "them with the team. Do not answer from general knowledge."
+        "them with the team. Do not answer from general knowledge, and do not fall " +
+        "back on something you or the customer said earlier in this conversation — " +
+        "a document can be edited or removed between turns, so an earlier answer is " +
+        "not evidence of what is true now. This search result is."
       );
     default:
       return assertNever(outcome, "RetrievalOutcome");
