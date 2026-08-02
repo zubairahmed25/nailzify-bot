@@ -52,7 +52,7 @@ const RETURN_POLICY_TEXT = [
 describe("the model never regenerates the document", () => {
   it("forces the classification tool rather than leaving it optional", async () => {
     const { llm, seen } = fakeLlm({
-      toolCalls: [classifyCall({ title: "Return Policy", docType: "policy", sectionHeadings: [] })],
+      toolCalls: [classifyCall({ docType: "policy", sectionHeadings: [] })],
     });
 
     await classifyDocument(RETURN_POLICY_TEXT, { llm });
@@ -62,7 +62,7 @@ describe("the model never regenerates the document", () => {
 
   it("uses complete(), not stream() — this is a one-shot call with no reason to stream", async () => {
     const { llm } = fakeLlm({
-      toolCalls: [classifyCall({ title: "x", docType: "guide", sectionHeadings: [] })],
+      toolCalls: [classifyCall({ docType: "guide", sectionHeadings: [] })],
     });
 
     // fakeLlm's stream() throws — reaching this line without throwing IS the assertion.
@@ -77,7 +77,6 @@ describe("the model never regenerates the document", () => {
     const { llm } = fakeLlm({
       toolCalls: [
         classifyCall({
-          title: "Return Policy",
           docType: "policy",
           sectionHeadings: ["Money-Back Guarantee", "Damaged or Defective Items"],
         }),
@@ -96,7 +95,6 @@ describe("inserting headings by exact match only", () => {
     const { llm } = fakeLlm({
       toolCalls: [
         classifyCall({
-          title: "Return Policy",
           docType: "policy",
           sectionHeadings: ["Money-Back Guarantee"],
         }),
@@ -115,7 +113,6 @@ describe("inserting headings by exact match only", () => {
     const { llm } = fakeLlm({
       toolCalls: [
         classifyCall({
-          title: "Return Policy",
           docType: "policy",
           sectionHeadings: ["Money Back Guarantee!"], // note: not the real text
         }),
@@ -134,7 +131,6 @@ describe("inserting headings by exact match only", () => {
     const { llm } = fakeLlm({
       toolCalls: [
         classifyCall({
-          title: "Return Policy",
           docType: "policy",
           // The model was told to exclude source/attribution lines and did.
           sectionHeadings: ["Money-Back Guarantee", "Damaged or Defective Items"],
@@ -149,7 +145,7 @@ describe("inserting headings by exact match only", () => {
 
   it("returns the text completely unchanged when no headings are detected", async () => {
     const { llm } = fakeLlm({
-      toolCalls: [classifyCall({ title: "x", docType: "guide", sectionHeadings: [] })],
+      toolCalls: [classifyCall({ docType: "guide", sectionHeadings: [] })],
     });
 
     const result = await classifyDocument(RETURN_POLICY_TEXT, { llm });
@@ -160,7 +156,7 @@ describe("inserting headings by exact match only", () => {
   it("marks every occurrence of a repeated heading", async () => {
     const repeated = "Note\nSome text.\nNote\nMore text.";
     const { llm } = fakeLlm({
-      toolCalls: [classifyCall({ title: "x", docType: "guide", sectionHeadings: ["Note"] })],
+      toolCalls: [classifyCall({ docType: "guide", sectionHeadings: ["Note"] })],
     });
 
     const result = await classifyDocument(repeated, { llm });
@@ -170,7 +166,7 @@ describe("inserting headings by exact match only", () => {
 
   it("tolerates a non-array sectionHeadings instead of throwing", async () => {
     const { llm } = fakeLlm({
-      toolCalls: [classifyCall({ title: "x", docType: "guide", sectionHeadings: "not an array" })],
+      toolCalls: [classifyCall({ docType: "guide", sectionHeadings: "not an array" })],
     });
 
     const result = await classifyDocument(RETURN_POLICY_TEXT, { llm });
@@ -183,7 +179,7 @@ describe("inserting headings by exact match only", () => {
 describe("docType validation", () => {
   it("accepts a known category", async () => {
     const { llm } = fakeLlm({
-      toolCalls: [classifyCall({ title: "x", docType: "faq", sectionHeadings: [] })],
+      toolCalls: [classifyCall({ docType: "faq", sectionHeadings: [] })],
     });
 
     const result = await classifyDocument(RETURN_POLICY_TEXT, { llm });
@@ -197,48 +193,13 @@ describe("docType validation", () => {
     // customer's hands — unlike a fabricated price or shape, this does not
     // need to be a hard failure.
     const { llm } = fakeLlm({
-      toolCalls: [classifyCall({ title: "x", docType: "policies", sectionHeadings: [] })], // plural, invalid
+      toolCalls: [classifyCall({ docType: "policies", sectionHeadings: [] })], // plural, invalid
     });
 
     const result = await classifyDocument(RETURN_POLICY_TEXT, { llm });
 
     expect(result.docType).toBe("guide");
     expect(result.docTypeWasInvalid).toBe(true);
-  });
-});
-
-describe("title validation", () => {
-  it("throws when the model returns an empty title, rather than fabricating a placeholder", async () => {
-    // This function has no good fallback title to offer — the caller does (the
-    // original filename) — so failing loudly is more honest than inventing
-    // "Untitled Document".
-    const { llm } = fakeLlm({
-      toolCalls: [classifyCall({ title: "   ", docType: "guide", sectionHeadings: [] })],
-    });
-
-    await expect(classifyDocument(RETURN_POLICY_TEXT, { llm })).rejects.toBeInstanceOf(
-      DocumentClassificationFailed,
-    );
-  });
-
-  it("throws when title is missing entirely", async () => {
-    const { llm } = fakeLlm({
-      toolCalls: [classifyCall({ docType: "guide", sectionHeadings: [] })],
-    });
-
-    await expect(classifyDocument(RETURN_POLICY_TEXT, { llm })).rejects.toBeInstanceOf(
-      DocumentClassificationFailed,
-    );
-  });
-
-  it("trims a title with surrounding whitespace", async () => {
-    const { llm } = fakeLlm({
-      toolCalls: [classifyCall({ title: "  Return Policy  ", docType: "policy", sectionHeadings: [] })],
-    });
-
-    const result = await classifyDocument(RETURN_POLICY_TEXT, { llm });
-
-    expect(result.title).toBe("Return Policy");
   });
 });
 

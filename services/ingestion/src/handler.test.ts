@@ -37,8 +37,15 @@ function deps(over: {
   extractedText?: string;
   extractThrows?: Error;
   /** Scripts the fake LLM's classify_document tool call. */
-  llmToolCall?: { title?: string; docType?: string; sectionHeadings?: string[] };
+  llmToolCall?: { docType?: string; sectionHeadings?: string[] };
   llmThrows?: Error;
+  /**
+   * What getUploadTitle returns — the merchant's "Purpose" text, set at
+   * upload time by services/admin, not something the model invents. Null
+   * (the default) exercises the "?? id" fallback for a PDF that landed under
+   * raw/ outside the admin upload endpoint.
+   */
+  uploadTitle?: string;
 } = {}) {
   const files = over.files ?? { "raw/return-policy.md": POLICY };
   const pdfFiles = over.pdfFiles ?? {};
@@ -49,13 +56,15 @@ function deps(over: {
   const deletedDocuments: string[] = [];
   const readKeys: string[] = [];
   const readBytesKeys: string[] = [];
-  const uploadReadyCalls: { documentId: string; title: string; docType: string }[] = [];
+  const uploadReadyCalls: { documentId: string; docType: string }[] = [];
   const uploadFailedCalls: { documentId: string; errorMessage: string }[] = [];
   const uploadUnchangedCalls: string[] = [];
 
+  const upsertedTitles: unknown[] = [];
   const vectors: VectorStore = {
     upsert: async (_ns, records) => {
       upserted.push(...records.map((r) => r.id));
+      upsertedTitles.push(...records.map((r) => r.metadata["title"]));
     },
     searchKnowledge: async () => [],
     searchProducts: async () => [],
@@ -115,7 +124,6 @@ function deps(over: {
             id: "t1",
             name: "classify_document",
             input: {
-              title: over.llmToolCall?.title ?? "Uploaded Document",
               docType: over.llmToolCall?.docType ?? "guide",
               sectionHeadings: over.llmToolCall?.sectionHeadings ?? [],
             },
@@ -153,10 +161,12 @@ function deps(over: {
       },
       // Admin-PDF-upload tracking. recordUploadStarted is not exercised here —
       // it is called by the upload endpoint, not the ingestion Lambda — but
-      // recordUploadReady/Failed ARE, by ingestPdf, and now actually record.
+      // getUploadTitle and recordUploadReady/Failed ARE, by ingestPdf, and
+      // now actually record.
       recordUploadStarted: async () => {},
-      recordUploadReady: async ({ documentId, title, docType }) => {
-        uploadReadyCalls.push({ documentId, title, docType });
+      getUploadTitle: async () => over.uploadTitle ?? null,
+      recordUploadReady: async ({ documentId, docType }) => {
+        uploadReadyCalls.push({ documentId, docType });
       },
       recordUploadFailed: async ({ documentId, errorMessage }) => {
         uploadFailedCalls.push({ documentId, errorMessage });
@@ -173,6 +183,7 @@ function deps(over: {
   return {
     deps: built,
     upserted,
+    upsertedTitles,
     deletedDocuments,
     readKeys,
     readBytesKeys,
@@ -445,7 +456,8 @@ describe("admin-uploaded PDFs", () => {
       files: {},
       pdfFiles: { "raw/uploads/shipping-policy-ab12.pdf": PDF_BYTES },
       extractedText: "Shipping Policy\n\nWe ship worldwide within 5 business days.",
-      llmToolCall: { title: "Shipping Policy", docType: "policy", sectionHeadings: [] },
+      llmToolCall: { docType: "policy", sectionHeadings: [] },
+      uploadTitle: "Shipping Policy",
     });
 
     const result = await handleIngestion(
@@ -474,18 +486,48 @@ describe("admin-uploaded PDFs", () => {
     expect(d.readKeys).toEqual([]);
   });
 
-  it("records the upload as ready with the classified title and category", async () => {
+  it("records the upload as ready with the classified category", async () => {
     const d = deps({
       files: {},
       pdfFiles: { "raw/uploads/nail-care-guide.pdf": PDF_BYTES },
-      llmToolCall: { title: "Nail Care Guide", docType: "guide", sectionHeadings: [] },
+      llmToolCall: { docType: "guide", sectionHeadings: [] },
     });
 
     await handleIngestion(ebEvent("Object Created", "raw/uploads/nail-care-guide.pdf"), d.deps);
 
-    expect(d.uploadReadyCalls).toEqual([
-      { documentId: "nail-care-guide", title: "Nail Care Guide", docType: "guide" },
-    ]);
+    expect(d.uploadReadyCalls).toEqual([{ documentId: "nail-care-guide", docType: "guide" }]);
+  });
+
+  it("indexes the chunk under the merchant's own Purpose title, not a model-derived one", async () => {
+    // THE ACTUAL FEATURE: title comes from getUploadTitle — the "Purpose" text
+    // set at upload time (services/admin) — never from classification, which
+    // no longer even asks the model for one.
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/nail-care-guide.pdf": PDF_BYTES },
+      uploadTitle: "Nail Care Guide",
+    });
+
+    await handleIngestion(ebEvent("Object Created", "raw/uploads/nail-care-guide.pdf"), d.deps);
+
+    expect(d.upsertedTitles).toContain("Nail Care Guide");
+  });
+
+  it("falls back to the document id when no upload record has a title", async () => {
+    // Genuinely rare: a PDF that landed under raw/ outside the admin upload
+    // endpoint entirely (a manual console upload, a migration script), so
+    // recordUploadStarted never ran and there is no Purpose to read back.
+    // Mirrors the "?? id" fallback markdown documents already use when they
+    // have no H1 heading.
+    const d = deps({
+      files: {},
+      pdfFiles: { "raw/uploads/mystery.pdf": PDF_BYTES },
+      // uploadTitle deliberately omitted — getUploadTitle returns null.
+    });
+
+    await handleIngestion(ebEvent("Object Created", "raw/uploads/mystery.pdf"), d.deps);
+
+    expect(d.upsertedTitles).toContain("mystery");
   });
 
   it("records failure and reports 'failed' rather than throwing, when the PDF has no text layer", async () => {
@@ -543,7 +585,7 @@ describe("admin-uploaded PDFs", () => {
     const first = deps({
       files: {},
       pdfFiles: { "raw/uploads/doc.pdf": PDF_BYTES },
-      llmToolCall: { title: "x", docType: "guide", sectionHeadings: [] },
+      llmToolCall: { docType: "guide", sectionHeadings: [] },
     });
     await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), first.deps);
     const version = first.documentVersions["doc"];
@@ -554,7 +596,7 @@ describe("admin-uploaded PDFs", () => {
       documentVersions: { doc: version! },
       // A DIFFERENT classification result for identical bytes — as a prompt
       // change over time might produce.
-      llmToolCall: { title: "A Different Title", docType: "faq", sectionHeadings: ["x"] },
+      llmToolCall: { docType: "faq", sectionHeadings: ["x"] },
     });
     const result = await handleIngestion(ebEvent("Object Created", "raw/uploads/doc.pdf"), second.deps);
 

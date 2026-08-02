@@ -57,13 +57,21 @@ export async function listUploads(): Promise<readonly UploadedDocument[]> {
   return body.documents;
 }
 
+/**
+ * `purpose` (e.g. "Returns", "About Us") is what the merchant types to say
+ * what this document is — it becomes both the document's title and its
+ * identity server-side (services/admin/src/composition-root.ts), which is
+ * why there is no `filename` parameter here at all. Whatever the picked
+ * file happens to be called on the merchant's computer never leaves the
+ * browser.
+ */
 export async function createUpload(
-  filename: string,
+  purpose: string,
 ): Promise<{ documentId: string; uploadUrl: string }> {
   const response = await authed(BASE, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ filename }),
+    body: JSON.stringify({ purpose }),
   });
   return (await response.json()) as { documentId: string; uploadUrl: string };
 }

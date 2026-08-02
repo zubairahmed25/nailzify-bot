@@ -28,6 +28,8 @@ export interface UploadSlot {
   readonly documentId: string;
   readonly s3Key: string;
   readonly uploadUrl: string;
+  /** The trimmed Purpose text, exactly as it will be written as the title. */
+  readonly title: string;
 }
 
 export interface AdminDeps {
@@ -35,8 +37,13 @@ export interface AdminDeps {
   readonly sessionSecret: string;
   readonly apiKey: string;
   readonly shopDomain: string;
-  /** Mints a presigned PUT URL and the document id it will resolve to. */
-  createUploadSlot(filename: string): Promise<UploadSlot>;
+  /**
+   * Mints a presigned PUT URL and the document id it will resolve to, from
+   * the merchant's own "Purpose" text (e.g. "Returns", "About Us") — NOT a
+   * filename. Purpose doubles as both the document's identity and its title;
+   * see documentIdFromPurpose for why that replaced filename-based identity.
+   */
+  createUploadSlot(purpose: string): Promise<UploadSlot>;
   /** Removes the S3 object. The EventBridge ObjectRemoved rule purges its vectors. */
   deleteUploadObject(documentId: string): Promise<void>;
 }
@@ -81,8 +88,9 @@ export function buildAdminDeps(config: AdminConfig): AdminDeps {
     apiKey: config.apiKey,
     shopDomain: config.shopDomain,
 
-    async createUploadSlot(filename) {
-      const documentId = documentIdFromFilename(filename);
+    async createUploadSlot(purpose) {
+      const title = purpose.trim();
+      const documentId = documentIdFromPurpose(title);
       const s3Key = keyFor(documentId);
 
       // ⚠️ NO ContentType ON THE SIGNED COMMAND, DELIBERATELY. Binding one
@@ -100,7 +108,7 @@ export function buildAdminDeps(config: AdminConfig): AdminDeps {
         { expiresIn: ttlSeconds },
       );
 
-      return { documentId, s3Key, uploadUrl };
+      return { documentId, s3Key, uploadUrl, title };
     },
 
     async deleteUploadObject(documentId) {
@@ -112,22 +120,39 @@ export function buildAdminDeps(config: AdminConfig): AdminDeps {
 }
 
 /**
- * `raw/uploads/return-policy.pdf` must resolve to the id `return-policy` —
- * IDENTICAL to `documentIdFromKey` in services/ingestion/src/handler.ts, or a
- * PDF uploaded through this endpoint gets one id here (`recordUploadStarted`)
- * and a different one there (`recordUploadReady` / `recordUploadFailed`),
- * leaving the admin page showing "Processing…" forever.
+ * The merchant's "Purpose" text ("Returns", "About Us") is both the title and,
+ * slugified, the document id — NOT the filename. `raw/uploads/returns.pdf`
+ * must resolve to the id `returns`, IDENTICAL to `documentIdFromKey` in
+ * services/ingestion/src/handler.ts, or a PDF uploaded through this endpoint
+ * gets one id here (`recordUploadStarted`) and a different one there
+ * (`recordUploadReady` / `recordUploadFailed`), leaving the admin page
+ * showing "Processing…" forever.
  *
- * Re-uploading a file with the same name is INTENTIONALLY treated as updating
- * that same document, mirroring how a re-uploaded markdown file already works
- * — "fix a typo, upload the corrected PDF" is the expected merchant workflow,
- * not a collision to guard against.
+ * ⚠️ WHY PURPOSE, NOT THE FILE'S NAME. Two reasons, one structural and one
+ * about failure modes:
+ *
+ * 1. The identity a merchant actually thinks in is "the Returns document",
+ *    not whatever their computer happened to name the file — `scan_2024.pdf`,
+ *    `Copy of returns (2).pdf`. Uploading a new "Returns" PDF replaces the old
+ *    one regardless of what either file was called, which is the update
+ *    semantic merchants expect: "fix a typo, upload the corrected file."
+ *
+ * 2. It used to be the model's job to invent a title from the document's own
+ *    content (packages/core/src/application/classify-document.ts). That was a
+ *    GUESS, and guesses can go wrong in a way a structural fix eliminates
+ *    rather than mitigates: a short or sparse PDF gave the model nothing
+ *    confident to summarize, and it started emitting placeholder-looking
+ *    titles like "<UNKNOWN>" — a live bug, not a hypothetical one. Purpose is
+ *    known upfront, from the merchant, correct by construction.
+ *
+ * Lowercased, unlike the old filename-based slug — Purpose is free-typed
+ * prose ("About Us"), and an id built from it reads better normalised than
+ * filenames (already mostly-lowercase-with-dashes by convention) ever needed.
  */
-function documentIdFromFilename(filename: string): string {
-  const base = filename
-    .replace(/^.*[/\\]/, "")
-    .replace(/\.[^.]+$/, "")
-    .trim();
-  const slug = base.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+function documentIdFromPurpose(purpose: string): string {
+  const slug = purpose
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
   return slug.length > 0 ? slug.slice(0, 120) : "document";
 }

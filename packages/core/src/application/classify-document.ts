@@ -10,8 +10,8 @@
  * reformatted with `##` headings inserted. That is wrong for two reasons.
  *
  * First, cost and latency scale with the document — a ten-page policy becomes
- * a ten-page model OUTPUT, when the only new information needed is a title, a
- * category, and where the section breaks are.
+ * a ten-page model OUTPUT, when the only new information needed is a category
+ * and where the section breaks are.
  *
  * Second, and more seriously: asking a model to reproduce a long text VERBATIM
  * is a known failure mode. Generation is not a copy operation — a model can
@@ -21,17 +21,32 @@
  * policy customers rely on, silently altered by an LLM, with no error and no
  * signal anywhere that it happened.
  *
- * So the model is asked for three small things — title, category, and a list of
- * heading STRINGS — and this code finds those strings in the ORIGINAL text
- * itself via exact match. The document body a customer's question is eventually
- * answered from is never regenerated; it is only ever copied by our own code
- * from the bytes the PDF actually contained.
+ * So the model is asked for two small things — category and a list of heading
+ * STRINGS — and this code finds those strings in the ORIGINAL text itself via
+ * exact match. The document body a customer's question is eventually answered
+ * from is never regenerated; it is only ever copied by our own code from the
+ * bytes the PDF actually contained.
  *
  * A heading the model claims but that does not appear verbatim in the source
  * (a paraphrase, a hallucination) is simply skipped — reported, not trusted.
  * That degrades gracefully to slightly coarser chunking, which is the same
  * acceptable fallback this pipeline already has for a PDF with no detectable
  * headings at all.
+ *
+ * ============================================================================
+ * WHY THE MODEL IS NOT ASKED FOR A TITLE ANYMORE
+ * ============================================================================
+ *
+ * It used to be. A title asked of the model is a title GUESSED from content,
+ * and a guess can go wrong in a way a structural fix eliminates rather than
+ * mitigates: a short, sparse document (a one-line note, a brief announcement)
+ * gave the model nothing confident to summarize, and it started inventing
+ * placeholder-looking titles like "<UNKNOWN>" instead of committing to an
+ * answer — a live bug, not a hypothetical one. The title now comes from the
+ * merchant, upfront, as the required "Purpose" field on the admin upload page
+ * (services/admin) — it doubles as the document's identity, so it is known
+ * before this function is ever called, correct by construction, and never
+ * blank while the LLM is still thinking.
  */
 
 import type { DocType } from "../domain/knowledge/chunk.js";
@@ -45,26 +60,23 @@ const KNOWN_DOC_TYPES: readonly DocType[] = ["policy", "guide", "faq"];
 
 const SYSTEM_PROMPT = `You are classifying a company document for a retail chatbot's knowledge base. Read the text and call ${TOOL_NAME} with:
 
-- title: a short, clear title for the document, drawn from its content. Never use a filename — you were not given one. This applies even to a very short document — a single sentence still has a subject; summarize what it is about in a few words (e.g. a one-line note about who owns the store becomes something like "Store Ownership", not a placeholder). Never output something like "Unknown", "N/A", or "<UNKNOWN>" — always give your best genuine, specific title.
 - docType: "policy" for return, shipping, warranty or legal terms; "faq" for a question-and-answer format document; "guide" for anything else (how-to, product care, sizing, general information).
 - sectionHeadings: the lines in the text that are genuine section headings, copied EXACTLY character-for-character as they appear in the source — so they can be found again by an exact string match. Do not paraphrase, summarize, or fix typos in a heading. Do not include the document's own title, page numbers, addresses, or a source/attribution line (e.g. "Source: https://..."). Only include lines that clearly introduce a new section of content. If the document has no clear section breaks, return an empty list — do not invent structure that is not there.`;
 
 const CLASSIFY_TOOL = {
   name: TOOL_NAME,
-  description: "Record this document's title, category, and detected section headings.",
+  description: "Record this document's category and detected section headings.",
   inputSchema: {
     type: "object",
     properties: {
-      title: { type: "string" },
       docType: { type: "string", enum: KNOWN_DOC_TYPES },
       sectionHeadings: { type: "array", items: { type: "string" } },
     },
-    required: ["title", "docType", "sectionHeadings"],
+    required: ["docType", "sectionHeadings"],
   },
 } as const;
 
 export interface DocumentClassification {
-  readonly title: string;
   readonly docType: DocType;
   /** The ORIGINAL text, unmodified except for `## ` inserted before matched heading lines. */
   readonly markdown: string;
@@ -112,15 +124,6 @@ export async function classifyDocument(
   }
 
   const input = call.input;
-  const title = typeof input["title"] === "string" ? input["title"].trim() : "";
-  if (title.length === 0) {
-    // Deliberately NOT defaulted to "Untitled Document" here. This function has
-    // no good fallback title to offer; the caller does (the original filename),
-    // and choosing between "fail" and "fabricate a placeholder" belongs to
-    // whoever has enough context to fail helpfully.
-    throw new DocumentClassificationFailed("the model returned no usable title");
-  }
-
   const rawDocType = input["docType"];
   const docTypeWasInvalid = !KNOWN_DOC_TYPES.includes(rawDocType as DocType);
   // Falls back to "guide" on an invalid category rather than failing the whole
@@ -135,7 +138,7 @@ export async function classifyDocument(
 
   const { markdown, unmatchedHeadings } = insertHeadings(rawText, headings);
 
-  return { title, docType, markdown, unmatchedHeadings, docTypeWasInvalid };
+  return { docType, markdown, unmatchedHeadings, docTypeWasInvalid };
 }
 
 /**

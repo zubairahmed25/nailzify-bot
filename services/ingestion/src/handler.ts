@@ -341,9 +341,16 @@ async function ingestPdf(
     const rawText = await deps.pdfExtractor.extractText(bytes);
     const classification = await classifyDocument(rawText, { llm: deps.llm });
 
+    // The merchant's own "Purpose" input, set the instant they started this
+    // upload (services/admin) — never guessed by the model. Falls back to the
+    // document id only for a PDF that landed under raw/ outside the admin
+    // upload endpoint (a manual console upload, a migration script), the same
+    // "?? id" pattern markdown documents already use when they have no H1.
+    const title = (await deps.state.getUploadTitle(id)) ?? id;
+
     const document: SourceDocument = {
       id: DocumentId(id),
-      title: classification.title,
+      title,
       docType: classification.docType,
       markdown: classification.markdown,
       version,
@@ -354,11 +361,7 @@ async function ingestPdf(
     // Only after ingestOne's own version-tracking write has succeeded — a
     // merchant seeing "Ready" on the admin page should mean the document is
     // genuinely searchable, not merely that classification finished.
-    await deps.state.recordUploadReady({
-      documentId: id,
-      title: classification.title,
-      docType: classification.docType,
-    });
+    await deps.state.recordUploadReady({ documentId: id, docType: classification.docType });
 
     // classification.unmatchedHeadings is deliberately not surfaced further
     // than this yet — it degrades to slightly coarser chunking, not a failure,

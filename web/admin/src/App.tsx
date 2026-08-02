@@ -10,6 +10,7 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [purpose, setPurpose] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -42,14 +43,18 @@ export function App() {
     async (event: Event) => {
       event.preventDefault();
       const file = fileInput.current?.files?.[0];
-      if (!file) return;
+      const trimmedPurpose = purpose.trim();
+      if (!file || !trimmedPurpose) return;
 
       setUploading(true);
       setError(null);
       try {
-        const { uploadUrl } = await createUpload(file.name);
+        // The file's own name is never sent — purpose is the only thing that
+        // determines this document's title and identity. See api.ts.
+        const { uploadUrl } = await createUpload(trimmedPurpose);
         await putFile(uploadUrl, file);
         if (fileInput.current) fileInput.current.value = "";
+        setPurpose("");
         await refresh();
       } catch (cause) {
         setError(describeError(cause));
@@ -57,7 +62,7 @@ export function App() {
         setUploading(false);
       }
     },
-    [refresh],
+    [purpose, refresh],
   );
 
   const handleDelete = useCallback(
@@ -80,12 +85,22 @@ export function App() {
       <h1>Knowledge base</h1>
       <p class="lede">
         Upload a PDF — a policy, a guide, an FAQ — and it becomes something the chat bot can
-        answer questions from. Re-uploading a file with the same name replaces that document.
+        answer questions from. Give it a Purpose describing what it's about ("Returns", "About
+        Us", "Recent Promotions"): that becomes its title, and uploading again under the same
+        Purpose replaces that document.
       </p>
 
       <form class="upload-form" onSubmit={handleUpload}>
+        <input
+          type="text"
+          class="purpose-input"
+          placeholder="Purpose — e.g. Returns, About Us"
+          value={purpose}
+          onInput={(e) => setPurpose((e.target as HTMLInputElement).value)}
+          disabled={uploading}
+        />
         <input ref={fileInput} type="file" accept="application/pdf" disabled={uploading} />
-        <button type="submit" disabled={uploading}>
+        <button type="submit" disabled={uploading || purpose.trim().length === 0}>
           {uploading ? "Uploading…" : "Upload"}
         </button>
       </form>

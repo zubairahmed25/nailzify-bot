@@ -64,15 +64,22 @@ export async function handleAdminRequest(
   }
 
   if (method === "POST" && UPLOADS_PATH.test(path)) {
-    const filename = readFilename(event);
-    if (!filename) return json(400, { error: "filename is required" });
+    const purpose = readPurpose(event);
+    if (!purpose) return json(400, { error: "purpose is required" });
 
-    const slot = await deps.createUploadSlot(filename);
+    const slot = await deps.createUploadSlot(purpose);
     // Written the instant the slot is minted, before the browser has uploaded
     // a single byte — the admin page has something honest to show
     // ("Processing…") from the moment it makes this request, rather than a
-    // blank row until the PUT completes and ingestion picks it up.
-    await deps.state.recordUploadStarted({ documentId: slot.documentId, s3Key: slot.s3Key });
+    // blank row until the PUT completes and ingestion picks it up. title
+    // comes from the slot, not a fresh read of `purpose` — it is the exact,
+    // trimmed string createUploadSlot already committed to as this
+    // document's identity.
+    await deps.state.recordUploadStarted({
+      documentId: slot.documentId,
+      s3Key: slot.s3Key,
+      title: slot.title,
+    });
 
     return json(200, { documentId: slot.documentId, uploadUrl: slot.uploadUrl });
   }
@@ -115,7 +122,7 @@ function headerValue(
   return key ? headers[key] : undefined;
 }
 
-function readFilename(event: AdminEvent): string | null {
+function readPurpose(event: AdminEvent): string | null {
   if (!event.body) return null;
 
   const text = event.isBase64Encoded
@@ -130,6 +137,6 @@ function readFilename(event: AdminEvent): string | null {
   }
 
   if (typeof parsed !== "object" || parsed === null) return null;
-  const filename = (parsed as Record<string, unknown>)["filename"];
-  return typeof filename === "string" && filename.trim().length > 0 ? filename : null;
+  const purpose = (parsed as Record<string, unknown>)["purpose"];
+  return typeof purpose === "string" && purpose.trim().length > 0 ? purpose : null;
 }

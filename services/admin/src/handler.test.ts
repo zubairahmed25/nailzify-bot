@@ -33,7 +33,7 @@ interface DepsOptions {
 }
 
 function deps(options: DepsOptions = {}) {
-  const recordUploadStartedCalls: { documentId: string; s3Key: string }[] = [];
+  const recordUploadStartedCalls: { documentId: string; s3Key: string; title: string }[] = [];
   const deleteUploadRecordCalls: string[] = [];
   const deleteUploadObjectCalls: string[] = [];
   const createUploadSlotCalls: string[] = [];
@@ -42,6 +42,7 @@ function deps(options: DepsOptions = {}) {
     documentId: "return-policy",
     s3Key: "raw/uploads/return-policy.pdf",
     uploadUrl: "https://s3.example.com/presigned-put-url",
+    title: "Return Policy",
   };
 
   const built: AdminDeps = {
@@ -63,6 +64,9 @@ function deps(options: DepsOptions = {}) {
       async recordUploadStarted(input) {
         recordUploadStartedCalls.push(input);
       },
+      async getUploadTitle() {
+        return null;
+      },
       async recordUploadReady() {},
       async recordUploadUnchanged() {},
       async recordUploadFailed() {},
@@ -73,8 +77,8 @@ function deps(options: DepsOptions = {}) {
         return options.documents ?? [];
       },
     },
-    async createUploadSlot(filename) {
-      createUploadSlotCalls.push(filename);
+    async createUploadSlot(purpose) {
+      createUploadSlotCalls.push(purpose);
       return slot;
     },
     async deleteUploadObject(documentId) {
@@ -134,7 +138,7 @@ describe("authentication", () => {
       event({
         headers: {},
         requestContext: { http: { method: "POST" } },
-        body: JSON.stringify({ filename: "policy.pdf" }),
+        body: JSON.stringify({ purpose: "Return Policy" }),
       }),
       built,
     );
@@ -171,15 +175,15 @@ describe("POST /admin/api/uploads", () => {
       body: JSON.stringify(body),
     });
 
-  it("mints an upload slot and records it as started", async () => {
+  it("mints an upload slot and records it as started, with the slot's title", async () => {
     const { built, recordUploadStartedCalls, createUploadSlotCalls } = deps();
 
-    const result = await handleAdminRequest(post({ filename: "return-policy.pdf" }), built);
+    const result = await handleAdminRequest(post({ purpose: "Return Policy" }), built);
 
     expect(result.statusCode).toBe(200);
-    expect(createUploadSlotCalls).toEqual(["return-policy.pdf"]);
+    expect(createUploadSlotCalls).toEqual(["Return Policy"]);
     expect(recordUploadStartedCalls).toEqual([
-      { documentId: "return-policy", s3Key: "raw/uploads/return-policy.pdf" },
+      { documentId: "return-policy", s3Key: "raw/uploads/return-policy.pdf", title: "Return Policy" },
     ]);
     expect(JSON.parse(result.body)).toEqual({
       documentId: "return-policy",
@@ -187,7 +191,7 @@ describe("POST /admin/api/uploads", () => {
     });
   });
 
-  it("rejects a missing filename", async () => {
+  it("rejects a missing purpose", async () => {
     const { built, createUploadSlotCalls } = deps();
 
     const result = await handleAdminRequest(post({}), built);
@@ -196,10 +200,10 @@ describe("POST /admin/api/uploads", () => {
     expect(createUploadSlotCalls).toHaveLength(0);
   });
 
-  it("rejects a blank filename", async () => {
+  it("rejects a blank purpose", async () => {
     const { built } = deps();
 
-    const result = await handleAdminRequest(post({ filename: "   " }), built);
+    const result = await handleAdminRequest(post({ purpose: "   " }), built);
 
     expect(result.statusCode).toBe(400);
   });
@@ -217,7 +221,7 @@ describe("POST /admin/api/uploads", () => {
 
   it("decodes a base64-encoded body", async () => {
     const { built, createUploadSlotCalls } = deps();
-    const body = Buffer.from(JSON.stringify({ filename: "return-policy.pdf" }), "utf8").toString(
+    const body = Buffer.from(JSON.stringify({ purpose: "Return Policy" }), "utf8").toString(
       "base64",
     );
 
@@ -231,7 +235,7 @@ describe("POST /admin/api/uploads", () => {
     );
 
     expect(result.statusCode).toBe(200);
-    expect(createUploadSlotCalls).toEqual(["return-policy.pdf"]);
+    expect(createUploadSlotCalls).toEqual(["Return Policy"]);
   });
 });
 

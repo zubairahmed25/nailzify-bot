@@ -37,30 +37,36 @@ const storeWith = (responses: Record<string, unknown> = {}) => {
 
 describe("recordUploadStarted", () => {
   it("is an UpdateCommand, never a PutCommand", async () => {
-    // ⚠️ THE REASON THIS IS AN UPDATE, NOT A PUT. A live bug: a merchant
-    // re-uploading unchanged content hits ingestPdf's cheap "skip, nothing
-    // changed" path (services/ingestion/src/handler.ts), which never
-    // re-classifies. A PutCommand here would have already wiped a correct
-    // title/docType to null the instant the re-upload started, and nothing
-    // on the skip path would ever set them again.
+    // A PutCommand would wipe docType/errorMessage to null on a re-upload
+    // that hits ingestPdf's cheap "skip, nothing changed" path
+    // (services/ingestion/src/handler.ts), which never re-classifies.
     const { store, find } = storeWith();
 
-    await store.recordUploadStarted({ documentId: "doc-1", s3Key: "raw/uploads/doc-1.pdf" });
+    await store.recordUploadStarted({
+      documentId: "doc-1",
+      s3Key: "raw/uploads/doc-1.pdf",
+      title: "Shipping Policy",
+    });
 
     expect(find("PutCommand")).toBeUndefined();
     expect(find("UpdateCommand")).toBeDefined();
   });
 
-  it("sets status, s3Key, timestamps and the GSI2 mirror unconditionally", async () => {
+  it("sets status, s3Key, title, timestamps and the GSI2 mirror unconditionally", async () => {
     const { store, find } = storeWith();
 
-    await store.recordUploadStarted({ documentId: "doc-1", s3Key: "raw/uploads/doc-1.pdf" });
+    await store.recordUploadStarted({
+      documentId: "doc-1",
+      s3Key: "raw/uploads/doc-1.pdf",
+      title: "Shipping Policy",
+    });
 
     const update = find("UpdateCommand")!;
     expect(update.input.Key).toEqual({ PK: "INGEST#UPLOAD", SK: "doc-1" });
     expect(update.input.ExpressionAttributeValues).toMatchObject({
       ":status": "processing",
       ":s3Key": "raw/uploads/doc-1.pdf",
+      ":title": "Shipping Policy",
       ":pk": "INGEST#UPLOAD",
     });
     // GSI2SK leads with the timestamp so a plain query sorts by upload time —
@@ -70,17 +76,22 @@ describe("recordUploadStarted", () => {
     );
   });
 
-  it("only initialises title, docType and errorMessage if_not_exists — never overwrites them", async () => {
-    // This is the actual fix: on a re-upload of unchanged content, a document
-    // already classified from a PRIOR successful run must keep that title and
-    // docType, not have them reset to null while ingestPdf's skip path leaves
-    // them that way forever.
+  it("overwrites title unconditionally but only initialises docType and errorMessage if_not_exists", async () => {
+    // title comes from the merchant's OWN input on this request — there is
+    // nothing stale about replacing it. docType is different: it comes from
+    // a PRIOR classification run, and a re-upload of unchanged content must
+    // keep it rather than having ingestPdf's skip path leave it null forever.
     const { store, find } = storeWith();
 
-    await store.recordUploadStarted({ documentId: "doc-1", s3Key: "raw/uploads/doc-1.pdf" });
+    await store.recordUploadStarted({
+      documentId: "doc-1",
+      s3Key: "raw/uploads/doc-1.pdf",
+      title: "Shipping Policy",
+    });
 
     const expr = find("UpdateCommand")!.input.UpdateExpression as string;
-    expect(expr).toMatch(/title = if_not_exists\(title, :null\)/);
+    expect(expr).toMatch(/title = :title/);
+    expect(expr).not.toMatch(/title = if_not_exists/);
     expect(expr).toMatch(/docType = if_not_exists\(docType, :null\)/);
     expect(expr).toMatch(/errorMessage = if_not_exists\(errorMessage, :null\)/);
   });
@@ -88,12 +99,39 @@ describe("recordUploadStarted", () => {
   it("stamps uploadedAt and updatedAt identically", async () => {
     const { store, find } = storeWith();
 
-    await store.recordUploadStarted({ documentId: "doc-1", s3Key: "raw/uploads/doc-1.pdf" });
+    await store.recordUploadStarted({
+      documentId: "doc-1",
+      s3Key: "raw/uploads/doc-1.pdf",
+      title: "Shipping Policy",
+    });
 
     expect(find("UpdateCommand")!.input.ExpressionAttributeValues[":now"]).toBeDefined();
     expect(find("UpdateCommand")!.input.UpdateExpression).toMatch(
       /uploadedAt = :now, updatedAt = :now/,
     );
+  });
+});
+
+describe("getUploadTitle", () => {
+  it("returns the title from the record", async () => {
+    const { store } = storeWith({ GetCommand: { Item: { title: "Return Policy" } } });
+
+    expect(await store.getUploadTitle("doc-1")).toBe("Return Policy");
+  });
+
+  it("returns null when the record has no title", async () => {
+    // The genuinely rare case: a PDF that landed under raw/ without going
+    // through the admin upload endpoint at all (a manual console upload, a
+    // migration script), so recordUploadStarted never ran.
+    const { store } = storeWith({ GetCommand: { Item: {} } });
+
+    expect(await store.getUploadTitle("doc-1")).toBeNull();
+  });
+
+  it("returns null when the record does not exist", async () => {
+    const { store } = storeWith({ GetCommand: {} });
+
+    expect(await store.getUploadTitle("doc-1")).toBeNull();
   });
 });
 
@@ -121,33 +159,29 @@ describe("recordUploadUnchanged", () => {
 // ---------------------------------------------------------------------------
 
 describe("recordUploadReady", () => {
-  it("updates status, title and docType without touching uploadedAt or s3Key", async () => {
+  it("updates status and docType without touching uploadedAt, s3Key or title", async () => {
     // ⚠️ THE REASON THIS IS AN UPDATE, NOT A PUT. A full overwrite would erase
     // the fields written by recordUploadStarted — this call runs seconds later,
     // from a different piece of code, and must not know or care what those
-    // values were.
+    // values were. title especially: it is the merchant's own "Purpose" input,
+    // set once at upload time, and this write has no fresher value to offer.
     const { store, find } = storeWith();
 
-    await store.recordUploadReady({
-      documentId: "doc-1",
-      title: "Shipping Policy",
-      docType: "policy",
-    });
+    await store.recordUploadReady({ documentId: "doc-1", docType: "policy" });
 
     const update = find("UpdateCommand");
     expect(update?.input.Key).toEqual({ PK: "INGEST#UPLOAD", SK: "doc-1" });
     expect(update?.input.ExpressionAttributeValues).toMatchObject({
       ":status": "ready",
-      ":title": "Shipping Policy",
       ":docType": "policy",
     });
-    expect(update?.input.UpdateExpression).not.toMatch(/uploadedAt|s3Key/);
+    expect(update?.input.UpdateExpression).not.toMatch(/uploadedAt|s3Key|title/);
   });
 
   it("clears any previous error message on success", async () => {
     const { store, find } = storeWith();
 
-    await store.recordUploadReady({ documentId: "doc-1", title: "x", docType: "guide" });
+    await store.recordUploadReady({ documentId: "doc-1", docType: "guide" });
 
     expect(find("UpdateCommand")?.input.ExpressionAttributeValues[":noError"]).toBeNull();
   });

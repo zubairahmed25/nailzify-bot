@@ -90,29 +90,41 @@ export interface IngestionStateStore {
    * ingestion has even started. Gives the admin page something honest to show
    * ("Processing…") the moment the merchant hits upload, rather than a blank
    * row until the Lambda gets around to it.
+   *
+   * `title` is the merchant's own "Purpose" text (services/admin), not
+   * something Claude derived — it is known upfront, correct by construction,
+   * and never blank while classification is still running. See
+   * getUploadTitle for why the ingestion Lambda needs to read it back.
    */
-  recordUploadStarted(input: { documentId: string; s3Key: string }): Promise<void>;
+  recordUploadStarted(input: { documentId: string; s3Key: string; title: string }): Promise<void>;
+
+  /**
+   * The title a merchant gave THIS upload at the moment they started it —
+   * read back by the ingestion Lambda's classification step, which no longer
+   * asks the model for a title at all (packages/core/src/application/
+   * classify-document.ts). Null only for a PDF that landed under `raw/`
+   * outside the admin upload endpoint (a manual console upload, a migration
+   * script) and so never went through recordUploadStarted — genuinely rare,
+   * and the caller falls back to the document id itself, the same "?? id"
+   * pattern markdown documents already use when they have no title heading.
+   */
+  getUploadTitle(documentId: string): Promise<string | null>;
 
   /**
    * The ingestion Lambda calls this once extraction, classification and
-   * embedding have all succeeded. `title` and `docType` are what Claude
-   * detected from the PDF's own text, not merchant input.
+   * embedding have all succeeded. `docType` is what Claude detected from the
+   * PDF's own text; the title was already set by recordUploadStarted and
+   * does not change here.
    */
-  recordUploadReady(input: {
-    documentId: string;
-    title: string;
-    docType: DocType;
-  }): Promise<void>;
+  recordUploadReady(input: { documentId: string; docType: DocType }): Promise<void>;
 
   /**
    * The ingestion Lambda calls this when a re-uploaded file's content hash
    * matches what's already indexed — the classification skip path in
    * services/ingestion/src/handler.ts's `ingestPdf`, which deliberately never
-   * re-runs Claude for content it has already seen. That path has no fresh
-   * title/docType to report, but `recordUploadStarted` no longer clobbers the
-   * existing ones (see its own doc comment), so there is nothing to WRITE
-   * here except flipping status back — the title/docType already sitting in
-   * the row are still correct.
+   * re-runs Claude for content it has already seen. Nothing to write except
+   * flipping status back — the title/docType already sitting in the row are
+   * still correct.
    */
   recordUploadUnchanged(documentId: string): Promise<void>;
 
@@ -136,7 +148,10 @@ export type UploadStatus = "processing" | "ready" | "failed";
 export interface UploadedDocument {
   readonly documentId: string;
   readonly status: UploadStatus;
-  /** Null until `recordUploadReady` runs — Claude hasn't looked at it yet. */
+  /**
+   * The merchant's "Purpose" text, set the instant upload starts — never
+   * null for anything uploaded through the admin page, "processing" included.
+   */
   readonly title: string | null;
   readonly docType: DocType | null;
   /** Set only when `status === "failed"`. */
@@ -242,35 +257,30 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
       }
     },
 
-    async recordUploadStarted({ documentId, s3Key }) {
+    async recordUploadStarted({ documentId, s3Key, title }) {
       const now = new Date().toISOString();
       await client.send(
         new UpdateCommand({
           TableName: config.tableName,
           Key: { PK: UPLOAD_PK, SK: documentId },
-          // ⚠️ UpdateCommand, NOT PutCommand — deliberately, after a live bug.
-          // Re-uploading a file with the SAME content (a merchant re-selecting
-          // the identical PDF, or just retrying) hashes to a version the
-          // ingestion Lambda has already indexed, so it takes the cheap "skip,
-          // nothing changed" path (services/ingestion/src/handler.ts) rather
-          // than re-classifying. A PutCommand here would have already wiped
-          // title/docType to null the instant the merchant re-uploaded, and
-          // nothing on the skip path would ever set them again — the admin
-          // page would show a blank title for a document that was correctly
-          // indexed the whole time. `if_not_exists` means title/docType/
-          // errorMessage start null on a genuinely NEW document and are left
-          // completely alone on a re-upload; only status, s3Key and the
-          // timestamps ever change here.
+          // UpdateCommand, not PutCommand: a re-upload (same merchant "Purpose",
+          // possibly changed file content) must not silently erase docType if
+          // this ever raced with recordUploadReady — SET makes that harmless
+          // rather than merely unlikely. `title` IS overwritten unconditionally
+          // here, unlike docType/errorMessage below — it comes from the
+          // merchant's own input on THIS request, not from something an
+          // earlier classification run determined, so there is nothing stale
+          // about replacing it.
           UpdateExpression:
-            "SET #status = :status, s3Key = :s3Key, uploadedAt = :now, updatedAt = :now, " +
-            "GSI2PK = :pk, GSI2SK = :gsi2sk, " +
-            "title = if_not_exists(title, :null), " +
+            "SET #status = :status, s3Key = :s3Key, title = :title, " +
+            "uploadedAt = :now, updatedAt = :now, GSI2PK = :pk, GSI2SK = :gsi2sk, " +
             "docType = if_not_exists(docType, :null), " +
             "errorMessage = if_not_exists(errorMessage, :null)",
           ExpressionAttributeNames: { "#status": "status" },
           ExpressionAttributeValues: {
             ":status": "processing" satisfies UploadStatus,
             ":s3Key": s3Key,
+            ":title": title,
             ":now": now,
             // Mirrored onto GSI2 — its OWN index, not GSI1, after discovering
             // live that DynamoDB cannot widen an existing GSI's projection
@@ -289,6 +299,18 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
       );
     },
 
+    async getUploadTitle(documentId) {
+      const result = await client.send(
+        new GetCommand({
+          TableName: config.tableName,
+          Key: { PK: UPLOAD_PK, SK: documentId },
+          ProjectionExpression: "title",
+        }),
+      );
+      const title = result.Item?.["title"];
+      return typeof title === "string" && title.length > 0 ? title : null;
+    },
+
     async recordUploadUnchanged(documentId) {
       await client.send(
         new UpdateCommand({
@@ -304,7 +326,7 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
       );
     },
 
-    async recordUploadReady({ documentId, title, docType }) {
+    async recordUploadReady({ documentId, docType }) {
       await client.send(
         new UpdateCommand({
           TableName: config.tableName,
@@ -312,14 +334,14 @@ export function createIngestionStateStore(config: IngestionStateConfig): Ingesti
           // SET only the fields this write actually knows about. A full PutItem
           // would silently erase uploadedAt/s3Key/GSI2SK if this ever ran before
           // recordUploadStarted — an ordering that should not happen, but SET
-          // makes it harmless rather than merely unlikely.
+          // makes it harmless rather than merely unlikely. title is NOT set
+          // here — recordUploadStarted already set it from the merchant's
+          // "Purpose" input, and this write has no fresher value to offer.
           UpdateExpression:
-            "SET #status = :status, title = :title, docType = :docType, " +
-            "errorMessage = :noError, updatedAt = :now",
+            "SET #status = :status, docType = :docType, errorMessage = :noError, updatedAt = :now",
           ExpressionAttributeNames: { "#status": "status" },
           ExpressionAttributeValues: {
             ":status": "ready" satisfies UploadStatus,
-            ":title": title,
             ":docType": docType,
             ":noError": null,
             ":now": new Date().toISOString(),
