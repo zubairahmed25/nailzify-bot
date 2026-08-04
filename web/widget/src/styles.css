@@ -428,7 +428,7 @@
 /* Sized in em so it tracks whichever text's font-size it sits next to (the
    grid title and the bar pill use different sizes) and colored via
    currentColor in the SVG itself so it always matches that text's color. */
-.nz-quick-icon { width: 1em; height: 1.09em; flex-shrink: 0; }
+.nz-quick-icon { width: 1.5em; height: 1.63em; flex-shrink: 0; }
 
 /* ---------------------------------------------------------------------- */
 /* Product cards                                                          */

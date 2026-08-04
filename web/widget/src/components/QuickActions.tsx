@@ -66,8 +66,8 @@ export function QuickActions({ onSelect, disabled }: QuickActionProps) {
           onClick={() => onSelect(action.title)}
         >
           <span class="nz-quick-action__title">
-            {action.icon && <NailIcon />}
             {action.title}
+            {action.icon && <NailIcon />}
           </span>
           <span class="nz-quick-action__subtitle">{action.subtitle}</span>
         </button>
@@ -133,8 +133,8 @@ export function QuickActionsBar({ onSelect, disabled }: QuickActionProps) {
             disabled={disabled}
             onClick={() => onSelect(action.title)}
           >
-            {action.icon && <NailIcon />}
             {action.title}
+            {action.icon && <NailIcon />}
           </button>
         ))}
       </div>
