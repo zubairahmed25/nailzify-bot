@@ -15,9 +15,6 @@ function CloseIcon() {
   );
 }
 
-/** The header's baseline tagline — "— replying now" is appended while busy. */
-const STATUS_TAGLINE = "Styling · Fit · Care";
-
 /** How near the bottom counts as "already following the conversation." */
 const NEAR_BOTTOM_PX = 120;
 
@@ -237,14 +234,7 @@ export function App() {
         <header class="nz-header">
           <div class="nz-header__text">
             <span class="nz-header__eyebrow">NAILZIFY</span>
-            <span class="nz-header__title">The Concierge</span>
-            <div class="nz-header__status">
-              <span class="nz-header__dot" aria-hidden="true" />
-              <span class="nz-header__caption">
-                {STATUS_TAGLINE}
-                {busy ? " — replying now" : ""}
-              </span>
-            </div>
+            <span class="nz-header__title">Your Fav Nail Bestie!</span>
           </div>
           <button class="nz-header__close" onClick={() => setOpen(false)} aria-label="Close chat">
             ✕
@@ -253,13 +243,12 @@ export function App() {
 
         <div class="nz-scroll" ref={scroller}>
           <div class="nz-msg nz-msg--assistant">
-            <span class="nz-concierge-label">CONCIERGE</span>
+            <span class="nz-concierge-label">NAIL BESTIE</span>
             <div class="nz-bubble">
-              <p class="nz-bubble__lede">Welcome to Nailzify. I&rsquo;m here to make the choosing easy.</p>
+              <p class="nz-bubble__lede">Hey, bestie! 💅 Need help finding your perfect set?</p>
               <p>
-                I can match a set to your shape and occasion, size you from our official fit
-                guide, and settle anything on wear, care, or returns. Where would you like to
-                start?
+                I can help you choose nails for your style, nail shape, or occasion, find your
+                size, and answer questions about application, wear, care, and returns.
               </p>
             </div>
           </div>

@@ -321,7 +321,7 @@
 .nz-msg--customer { align-items: flex-end; }
 .nz-msg--assistant { align-items: flex-start; }
 
-/* "CONCIERGE" — the greeting only. A reply later in the thread does not
+/* "NAIL BESTIE" — the greeting only. A reply later in the thread does not
    repeat it; the assistant's side of the conversation is already established
    by then. */
 .nz-concierge-label {
