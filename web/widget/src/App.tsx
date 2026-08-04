@@ -46,14 +46,50 @@ export function App() {
     savePersistedState({ open, messages });
   }, [open, messages]);
 
-  // Follow the stream, but only when the customer is already at the bottom.
+  // Whether the customer is currently following the bottom of the thread.
+  //
+  // ⚠️ A REF UPDATED ONLY BY REAL SCROLL EVENTS — deliberately not recomputed
+  // inside the auto-follow effect below, which is the bug this replaced.
+  // Product cards land all at once on the "done" event and add ~250-300px to
+  // `scrollHeight` in a single render, before `scrollTop` has had any chance
+  // to move. Recomputing "am I near the bottom?" AFTER that jump, from
+  // inside the very effect reacting to it, measures the gap against content
+  // that did not exist a moment ago — a customer who was genuinely at the
+  // bottom right up until the cards appeared reads as "scrolled away," and
+  // the view sticks on the text above the cards instead of following them
+  // down. A ref fed only by the scroll listener reflects where the customer
+  // actually was BEFORE this update, which is the only question that matters.
+  const followingBottom = useRef(true);
+
+  const isNearBottom = (el: HTMLDivElement) =>
+    el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+
+  // Tracks manual scrolling — a customer scrolling up mid-stream should see
+  // the "jump to latest" affordance immediately, not wait for the next token.
+  // This is also what keeps `followingBottom` correct: it fires again after
+  // OUR OWN programmatic scrollTop assignments below, since a scroll event
+  // fires either way, so the ref stays truthful without this effect needing
+  // to know who moved the scroll position.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const onScroll = () => {
+      const nearBottom = isNearBottom(el);
+      followingBottom.current = nearBottom;
+      setShowJump(!nearBottom && messages.length > 0);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    onScroll(); // correct on mount / reopen, not just on the next scroll
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [messages.length]);
+
+  // Follow the stream, but only when the customer was already at the bottom.
   // Yanking the view down while someone is reading an earlier answer is one of
   // the most irritating things a chat UI can do.
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-    if (nearBottom) {
+    if (followingBottom.current) {
       el.scrollTop = el.scrollHeight;
       setShowJump(false);
     } else if (messages.length > 0) {
@@ -61,23 +97,10 @@ export function App() {
     }
   }, [messages, toolActivity]);
 
-  // Tracks manual scrolling too, not just new content — a customer scrolling
-  // up mid-stream should see the affordance appear immediately, not wait for
-  // the next token.
-  useEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    const onScroll = () => {
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-      setShowJump(!nearBottom && messages.length > 0);
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [messages.length]);
-
   const jumpToLatest = () => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
+    followingBottom.current = true;
     setShowJump(false);
   };
 
