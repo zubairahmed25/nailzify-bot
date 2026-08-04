@@ -61,6 +61,28 @@ export function App() {
   // actually was BEFORE this update, which is the only question that matters.
   const followingBottom = useRef(true);
 
+  // A plain ref mirror of messages.length, updated every render. The scroll
+  // listener below reads this instead of closing over `messages.length`
+  // directly, which is what lets the listener be registered ONCE.
+  //
+  // ⚠️ IT USED TO BE A useEffect DEPENDENCY, AND THAT WAS THE BUG a second
+  // customer sent-a-message report actually traced back to. `send()` in
+  // useChat.ts appends the customer bubble AND an empty assistant bubble in
+  // one state update, so `messages.length` jumps the instant a reply starts.
+  // With `[messages.length]` in the deps array, that same render re-ran this
+  // effect's setup — which called `onScroll()` immediately to "correct state
+  // on mount" — and that synchronous call read `scrollHeight` already grown
+  // by the two new bubbles while `scrollTop` hadn't been advanced yet (the
+  // effect below does that, but runs after this one). On a mostly-empty
+  // panel that gap stayed under NEAR_BOTTOM_PX and nothing looked wrong; once
+  // a full round of conversation (plus the quick-actions bar eating vertical
+  // space) was already on screen, the same read crossed the threshold and
+  // wrongly marked the customer as "scrolled away," so the next reply never
+  // auto-scrolled into view. Same race the product-card fix addressed,
+  // reached through a second path the first fix didn't touch.
+  const messageCount = useRef(messages.length);
+  messageCount.current = messages.length;
+
   const isNearBottom = (el: HTMLDivElement) =>
     el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
 
@@ -70,18 +92,20 @@ export function App() {
   // OUR OWN programmatic scrollTop assignments below, since a scroll event
   // fires either way, so the ref stays truthful without this effect needing
   // to know who moved the scroll position.
+  //
+  // Registered once — see the messageCount comment above for why re-running
+  // this on every new message was itself the bug.
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
     const onScroll = () => {
       const nearBottom = isNearBottom(el);
       followingBottom.current = nearBottom;
-      setShowJump(!nearBottom && messages.length > 0);
+      setShowJump(!nearBottom && messageCount.current > 0);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    onScroll(); // correct on mount / reopen, not just on the next scroll
     return () => el.removeEventListener("scroll", onScroll);
-  }, [messages.length]);
+  }, []);
 
   // Follow the stream, but only when the customer was already at the bottom.
   // Yanking the view down while someone is reading an earlier answer is one of
@@ -107,10 +131,16 @@ export function App() {
   // On open — including the reopen after a navigation — jump to the latest
   // message. Restoring a conversation scrolled to its beginning shows the
   // customer the greeting instead of the answer they just acted on.
+  //
+  // Also resets `followingBottom`, since the scroll listener no longer
+  // corrects it on mount (see the messageCount comment above) — a reopen
+  // always lands at the bottom, so the ref should agree.
   useEffect(() => {
     if (!open) return;
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
+    followingBottom.current = true;
+    setShowJump(false);
   }, [open]);
 
   // Escape closes, and focus returns to the launcher. Without the second half,

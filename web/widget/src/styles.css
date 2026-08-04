@@ -609,8 +609,12 @@
 /* started. Not part of the original handoff (see QuickActions.tsx).       */
 /* ---------------------------------------------------------------------- */
 
-.nz-quick-bar {
+.nz-quick-bar-wrap {
+  position: relative;
   flex-shrink: 0;
+}
+
+.nz-quick-bar {
   display: flex;
   gap: 8px;
   padding: 10px 22px;
@@ -620,6 +624,32 @@
   border-top: 1px solid var(--nz-border);
 }
 .nz-quick-bar::-webkit-scrollbar { display: none; }
+
+/* Edge fades — hint that the row scrolls further without a hard visual cut
+   where a pill happens to end at the viewport edge. Pinned to the wrap, not
+   the scrolling row, so they stay put while the pills scroll underneath.
+   26px covers roughly half a pill so the fade reads as a gradient, not a
+   line. Matches `.nz-quick-bar`'s own background so a pill fading out blends
+   into the surface instead of into a visibly different edge color. */
+.nz-quick-bar__fade {
+  position: absolute;
+  top: 1px; /* stay off the border-top hairline */
+  bottom: 0;
+  width: 26px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.nz-quick-bar__fade--left {
+  left: 0;
+  background: linear-gradient(to right, var(--nz-surface), transparent);
+}
+.nz-quick-bar__fade--right {
+  right: 0;
+  background: linear-gradient(to left, var(--nz-surface), transparent);
+}
+.nz-quick-bar__fade.is-visible { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .nz-quick-bar__fade { transition: none; } }
 
 .nz-quick-bar__pill {
   flex-shrink: 0;
