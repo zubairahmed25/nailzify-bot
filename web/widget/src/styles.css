@@ -427,8 +427,11 @@
 
 /* Sized in em so it tracks whichever text's font-size it sits next to (the
    grid title and the bar pill use different sizes) and colored via
-   currentColor in the SVG itself so it always matches that text's color. */
-.nz-quick-icon { width: 1.5em; height: 1.63em; flex-shrink: 0; }
+   currentColor in the SVG itself so it always matches that text's color.
+   `top: 1px` corrects a visual baseline mismatch — the source glyph isn't
+   centered within its own viewBox, so flex centering alone left it reading
+   slightly high next to the text. */
+.nz-quick-icon { width: 1.8em; height: 1.96em; flex-shrink: 0; position: relative; top: 1px; }
 
 /* ---------------------------------------------------------------------- */
 /* Product cards                                                          */
