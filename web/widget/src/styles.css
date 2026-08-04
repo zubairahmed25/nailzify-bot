@@ -84,6 +84,7 @@
   --nz-shadow-panel: 0 32px 70px -28px rgb(60 32 44 / 0.28), 0 0 0 1px rgb(60 32 44 / 0.07);
   --nz-shadow-card: 0 8px 22px -14px rgb(60 32 44 / 0.22);
   --nz-shadow-send: 0 6px 16px -8px rgb(194 86 126 / 0.9);
+  --nz-shadow-composer-attention: 0 0 0 4px rgb(194 86 126 / 0.22);
 
   /* A high z-index because themes and cookie banners fight over this space.
      Not 2147483647: leaving headroom means a genuinely modal element — a
@@ -704,6 +705,22 @@
   align-items: flex-end;
   border-bottom: 1px solid var(--nz-composer-rule);
   padding-bottom: 9px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.nz-composer:focus-within { border-color: var(--nz-accent); }
+.nz-composer--attention { animation: nz-composer-attention 1.8s ease-out; }
+
+@keyframes nz-composer-attention {
+  0%, 100% { box-shadow: none; }
+  25%, 65% { box-shadow: var(--nz-shadow-composer-attention); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nz-composer { transition: none; }
+  .nz-composer--attention {
+    animation: none;
+    box-shadow: var(--nz-shadow-composer-attention);
+  }
 }
 
 .nz-input {

@@ -1,18 +1,41 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const MAX_LENGTH = 1000;
+
+export interface ComposerFocusRequest {
+  readonly id: number;
+  readonly emphasize: boolean;
+}
+
+interface ComposerProps {
+  readonly onSend: (text: string) => void;
+  readonly onStop: () => void;
+  readonly busy: boolean;
+  readonly focusRequest: ComposerFocusRequest;
+  readonly placeholder: string;
+}
 
 export function Composer({
   onSend,
   onStop,
   busy,
-}: {
-  onSend: (text: string) => void;
-  onStop: () => void;
-  busy: boolean;
-}) {
+  focusRequest,
+  placeholder,
+}: ComposerProps) {
   const [value, setValue] = useState("");
+  const [showAttention, setShowAttention] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (focusRequest.id === 0) return;
+
+    textarea.current?.focus({ preventScroll: true });
+    if (!focusRequest.emphasize) return;
+
+    setShowAttention(true);
+    const timeout = window.setTimeout(() => setShowAttention(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [focusRequest.id, focusRequest.emphasize]);
 
   const submit = () => {
     if (busy || !value.trim()) return;
@@ -24,7 +47,7 @@ export function Composer({
 
   return (
     <form
-      class="nz-composer"
+      class={`nz-composer${showAttention ? " nz-composer--attention" : ""}`}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -36,7 +59,7 @@ export function Composer({
         rows={1}
         value={value}
         maxLength={MAX_LENGTH}
-        placeholder="Ask about shapes, fit, wear time, returns…"
+        placeholder={placeholder}
         aria-label="Message"
         onInput={(e) => {
           const el = e.currentTarget;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { loadFont } from "./index.js";
 import { AgentAvatar } from "./components/AgentAvatar.js";
-import { Composer } from "./components/Composer.js";
+import { Composer, type ComposerFocusRequest } from "./components/Composer.js";
 import { Message } from "./components/Message.js";
 import { QuickActions, QuickActionsBar } from "./components/QuickActions.js";
 import { loadPersistedState, savePersistedState, useChat } from "./useChat.js";
@@ -31,13 +31,27 @@ export function App() {
   const scroller = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const launcher = useRef<HTMLButtonElement>(null);
+  const hasShownComposerCue = useRef(false);
+  const [composerFocusRequest, setComposerFocusRequest] = useState<ComposerFocusRequest>({
+    id: 0,
+    emphasize: false,
+  });
 
   const busy = status === "thinking" || status === "streaming";
+  const hasCustomerMessage = messages.some((message) => message.role === "customer");
   // Dots show only while there is nothing else on screen proving progress —
   // once real answer text is streaming in, the growing bubble IS the
   // indicator. Matches exactly when the old text-based status line used to
   // render something rather than sitting empty.
   const showTyping = status === "thinking" || toolActivity !== null;
+
+  const sendQuickAction = async (title: string) => {
+    await send(title);
+
+    const emphasize = !hasShownComposerCue.current;
+    hasShownComposerCue.current = true;
+    setComposerFocusRequest((current) => ({ id: current.id + 1, emphasize }));
+  };
 
   useEffect(() => {
     savePersistedState({ open, messages });
@@ -235,6 +249,9 @@ export function App() {
           <div class="nz-header__text">
             <span class="nz-header__eyebrow">NAILZIFY</span>
             <span class="nz-header__title">Your Fav Nail Bestie!</span>
+            <div class="nz-header__status" role="status" aria-label="Available">
+              <span class="nz-header__dot" aria-hidden="true" />
+            </div>
           </div>
           <button class="nz-header__close" onClick={() => setOpen(false)} aria-label="Close chat">
             ✕
@@ -255,7 +272,7 @@ export function App() {
 
           {/* Resting state only — before the first message. Does not
               reappear once the conversation has started. */}
-          {messages.length === 0 && <QuickActions onSelect={send} disabled={busy} />}
+          {messages.length === 0 && <QuickActions onSelect={sendQuickAction} disabled={busy} />}
 
           {messages.map((message) => (
             <Message key={message.id} message={message} />
@@ -288,10 +305,16 @@ export function App() {
             started, and stays for the rest of it — not part of the original
             handoff, added after real customers lost track of the options
             once they'd sent a first message. */}
-        {messages.length > 0 && <QuickActionsBar onSelect={send} disabled={busy} />}
+        {messages.length > 0 && <QuickActionsBar onSelect={sendQuickAction} disabled={busy} />}
 
         <div class="nz-composer-wrap">
-          <Composer onSend={send} onStop={stop} busy={busy} />
+          <Composer
+            onSend={send}
+            onStop={stop}
+            busy={busy}
+            focusRequest={composerFocusRequest}
+            placeholder={hasCustomerMessage ? "Reply" : "Ask anything.."}
+          />
           <p class="nz-footer">
             Answers are drawn from the Nailzify fit guide and store policies. Pricing and stock
             are live.
