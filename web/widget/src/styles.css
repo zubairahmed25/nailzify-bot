@@ -416,8 +416,19 @@
 .nz-quick-action:hover { border-color: var(--nz-border-hover); background: #fffbfc; }
 .nz-quick-action:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .nz-quick-action { transition: none; } }
-.nz-quick-action__title { font: 500 13px/1.2 "Jost", sans-serif; color: var(--nz-fg); }
+.nz-quick-action__title {
+  font: 500 13px/1.2 "Jost", sans-serif;
+  color: var(--nz-fg);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
 .nz-quick-action__subtitle { font: 300 11px/1.3 "Jost", sans-serif; color: var(--nz-muted); }
+
+/* Sized in em so it tracks whichever text's font-size it sits next to (the
+   grid title and the bar pill use different sizes) and colored via
+   currentColor in the SVG itself so it always matches that text's color. */
+.nz-quick-icon { width: 1em; height: 1.09em; flex-shrink: 0; }
 
 /* ---------------------------------------------------------------------- */
 /* Product cards                                                          */
@@ -654,6 +665,9 @@
 .nz-quick-bar__pill {
   flex-shrink: 0;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: transparent;
   border: 1px solid var(--nz-border-quick);
   border-radius: 999px;
