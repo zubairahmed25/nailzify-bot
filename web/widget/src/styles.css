@@ -605,6 +605,40 @@
 .nz-jump:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
 
 /* ---------------------------------------------------------------------- */
+/* Quick actions bar — pinned above the composer once the conversation has  */
+/* started. Not part of the original handoff (see QuickActions.tsx).       */
+/* ---------------------------------------------------------------------- */
+
+.nz-quick-bar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  padding: 10px 22px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--nz-surface);
+  border-top: 1px solid var(--nz-border);
+}
+.nz-quick-bar::-webkit-scrollbar { display: none; }
+
+.nz-quick-bar__pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid var(--nz-border-quick);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font: 500 12px/1 "Jost", sans-serif;
+  color: var(--nz-accent-text);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.nz-quick-bar__pill:hover { background: #fbeff3; border-color: var(--nz-border-hover); }
+.nz-quick-bar__pill:disabled { opacity: 0.5; cursor: default; }
+.nz-quick-bar__pill:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .nz-quick-bar__pill { transition: none; } }
+
+/* ---------------------------------------------------------------------- */
 /* Composer                                                                 */
 /* ---------------------------------------------------------------------- */
 

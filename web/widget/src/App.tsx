@@ -3,7 +3,7 @@ import { loadFont } from "./index.js";
 import { AgentAvatar } from "./components/AgentAvatar.js";
 import { Composer } from "./components/Composer.js";
 import { Message } from "./components/Message.js";
-import { QuickActions } from "./components/QuickActions.js";
+import { QuickActions, QuickActionsBar } from "./components/QuickActions.js";
 import { loadPersistedState, savePersistedState, useChat } from "./useChat.js";
 
 function CloseIcon() {
@@ -264,6 +264,12 @@ export function App() {
             </button>
           )}
         </div>
+
+        {/* Takes over from the resting-state grid once the conversation has
+            started, and stays for the rest of it — not part of the original
+            handoff, added after real customers lost track of the options
+            once they'd sent a first message. */}
+        {messages.length > 0 && <QuickActionsBar onSelect={send} disabled={busy} />}
 
         <div class="nz-composer-wrap">
           <Composer onSend={send} onStop={stop} busy={busy} />
