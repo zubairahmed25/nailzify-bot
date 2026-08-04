@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * A single-path nail glyph, next to "Help me pick" only — that's the one
+ * A single-path nail glyph, next to "Help me choose" only — that's the one
  * action a customer is literally choosing a nail shape from.
  *
  * `fill="currentColor"` rather than the source asset's own pink: the ask was
@@ -29,13 +29,13 @@ function NailIcon() {
  *
  * Clicking either form sends the action's TITLE as the customer's message,
  * verbatim — the same `send()` every typed question goes through. There is
- * no separate "intent" wiring: a title like "Help me pick" reaches the model
+ * no separate "intent" wiring: a title like "Help me choose" reaches the model
  * as an ordinary message, and the system prompt's own "ask before searching
  * only when you genuinely cannot construct a query" rule is what turns that
  * into a clarifying question rather than a blind search.
  */
 const ACTIONS: readonly { title: string; subtitle: string; icon?: boolean }[] = [
-  { title: "Help me pick", subtitle: "Shape, length, occasion", icon: true },
+  { title: "Help me choose", subtitle: "Shape, length, occasion", icon: true },
   { title: "Current promos", subtitle: "Bundles, offers, free shipping" },
   { title: "Wear & care", subtitle: "Apply, reuse, remove safely" },
   { title: "My order", subtitle: "Track, change or return" },

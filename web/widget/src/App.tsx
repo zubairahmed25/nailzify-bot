@@ -248,9 +248,9 @@ export function App() {
         <header class="nz-header">
           <div class="nz-header__text">
             <span class="nz-header__eyebrow">NAILZIFY</span>
-            <span class="nz-header__title">Your Fav Nail Bestie!</span>
-            <div class="nz-header__status" role="status" aria-label="Available">
+            <div class="nz-header__status" role="status">
               <span class="nz-header__dot" aria-hidden="true" />
+              <span class="nz-header__title">Your Fav Nail Bestie is live!</span>
             </div>
           </div>
           <button class="nz-header__close" onClick={() => setOpen(false)} aria-label="Close chat">
