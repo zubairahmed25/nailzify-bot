@@ -4,46 +4,86 @@
  * `:host` styles the element the shadow root is attached to. Everything is
  * namespaced `nz-` anyway — belt and braces, and it makes the DOM readable when
  * someone inspects a storefront.
+ *
+ * ============================================================================
+ * "ATELIER" REDESIGN (design_handoff_ai_concierge, direction 1a)
+ * ============================================================================
+ * Palette, type and shell below follow that handoff. Two deliberate
+ * departures from it, both accessibility fixes rather than taste calls — see
+ * the comments at --nz-muted/--nz-label and --nz-on-accent.
  */
 :host {
-  /* Panel canvas. The bubbles sit on this, so they must NOT also be this —
-     the message shape is what makes a conversation readable. */
-  --nz-bg: #fff5f5;
+  /* Panel canvas and its two gradients. Bubbles/cards are --nz-surface, not
+     this — the message shape is what makes a conversation readable. */
+  --nz-bg: #fdf4f8;
+  --nz-bg-soft: #fff9fb;
+  --nz-header-bg: #fffdfe;
+  --nz-header-bg-soft: #fef5f9;
   --nz-surface: #ffffff;
 
   /* Warm near-black. Pure #000 on a pink canvas reads as a rendering fault. */
-  --nz-fg: #3a2c30;
-  /* Darkened from #8c7a7e, which measured 4.04:1 on white — under the 4.5:1
-     bar, and this is the colour PRICES render in. 5.2:1 on white, 4.9:1 on the
-     pink panel, so it passes on both surfaces it appears against. */
-  --nz-muted: #7a686c;
-
-  --nz-accent: #ff80aa;
-  /*
-   * ⚠️ A SEPARATE, DEEPER PINK FOR TEXT ON WHITE.
-   *
-   * --nz-accent on white measures 2.2:1 — a link in it is barely readable, which
-   * is the exact bug fixed a few commits ago when links inherited body colour.
-   * This shade keeps the family at 4.6:1.
-   */
-  --nz-accent-text: #c43a6b;
+  --nz-fg: #241d21;
+  /* Paragraph text — greeting body, message prose. 6.29:1 on white. */
+  --nz-body: #6b5c63;
 
   /*
-   * ⚠️ TEXT ON THE ACCENT IS DARK, NOT WHITE.
-   *
-   * White on #ff80aa is 2.35:1 — failing WCAG for text (4.5:1) AND for UI
-   * components (3:1). The warm near-black is 5.6:1. Hot pink simply is not dark
-   * enough to carry white; the alternative was a deeper pink than the brand.
+   * ⚠️ THE HANDOFF'S OWN "muted / subtle / faint / eyebrow / mono-label"
+   * FAMILY FAILS WCAG AA — MEASURED, NOT ASSUMED. Five tokens between #8A7A81
+   * and #C0A9B1, used for real information a shopper reads (a quick-action
+   * subtitle, a product's price line, the composer's trust line), ranged from
+   * 4.05:1 down to 2.20:1 against white — the 4.5:1 floor for text under
+   * 18px. Collapsed to two darkened tones in the same warm-mauve hue rather
+   * than reproduced verbatim: the same kind of fix the previous palette's
+   * --nz-muted already needed once (it was darkened from #8c7a7e, which
+   * measured 4.04:1, for the same reason).
    */
-  --nz-on-accent: #3a2c30;
+  /* Secondary text: status caption, quick-action subtitles, product
+     meta/price, trust line, placeholder, close-button glyph. 5.2–5.6:1 across
+     every near-white surface this widget actually renders text on. */
+  --nz-muted: #79616b;
+  /* Small-caps micro-labels ONLY: the NAILZIFY eyebrow, the CONCIERGE tag
+     above the greeting, the mono placeholder label on an empty product
+     image. 4.7–5.1:1 — a visible step lighter than --nz-muted, just not
+     below the floor to get there. */
+  --nz-label: #816872;
 
-  --nz-border: #f2dee4;
-  --nz-radius: 14px;
+  --nz-accent: #c2567e;
+  --nz-accent-hover: #a03f66;
+  /*
+   * ⚠️ A SEPARATE, DARKER SHADE FOR TEXT ON WHITE — same reasoning as the
+   * previous palette's --nz-accent-text, different number. --nz-accent alone
+   * measures 4.26:1 on white: fine for an icon (send arrow, cart glyph —
+   * WCAG's non-text threshold is 3:1) but short of 4.5:1 for a sentence
+   * someone reads. Reuses the handoff's OWN hover shade rather than inventing
+   * a colour — it was already in the palette and happens to measure 6.18:1.
+   */
+  --nz-accent-text: #a03f66;
+  /*
+   * ⚠️ TEXT ON THE ACCENT IS WHITE HERE, NOT DARK — different from the
+   * previous palette, because the underlying colour is different. #C2567E is
+   * dark enough that white measures 4.26:1 on it, clearing WCAG's 3:1 floor
+   * for a UI component/icon (the send arrow, the cart glyph) — neither is a
+   * sentence of text. The previous accent, #FF80AA, could not carry white at
+   * all (2.35:1); this one can, for icon-weight content.
+   */
+  --nz-on-accent: #ffffff;
 
-  /* Two layers: a tight contact shadow plus a soft ambient one. A single large
-     blur reads as a glow rather than lift. */
-  --nz-shadow: 0 1px 2px rgb(58 44 48 / 0.06), 0 2px 8px rgb(58 44 48 / 0.05);
-  --nz-shadow-card: 0 1px 2px rgb(58 44 48 / 0.07), 0 3px 10px rgb(58 44 48 / 0.07);
+  --nz-border: #f5dfe8;
+  --nz-border-card: #f6e1ea;
+  --nz-border-quick: #f6dee8;
+  --nz-border-hover: #e1a9bc;
+  --nz-composer-rule: #efd5df;
+
+  /* User bubble — dark, not pink, in this direction. 13.5:1 for its text. */
+  --nz-user-bubble: linear-gradient(135deg, #4c2432, #3a1b26);
+  --nz-user-text: #f6eef1;
+
+  --nz-online-dot: #6fbf8e;
+  --nz-img-placeholder: #fbe6ec;
+
+  --nz-shadow-panel: 0 32px 70px -28px rgb(60 32 44 / 0.28), 0 0 0 1px rgb(60 32 44 / 0.07);
+  --nz-shadow-card: 0 8px 22px -14px rgb(60 32 44 / 0.22);
+  --nz-shadow-send: 0 6px 16px -8px rgb(194 86 126 / 0.9);
 
   /* A high z-index because themes and cookie banners fight over this space.
      Not 2147483647: leaving headroom means a genuinely modal element — a
@@ -51,19 +91,11 @@
   all: initial;
 
   /*
-   * ⚠️ JOSEFIN SANS HAS A SMALL X-HEIGHT. At an identical font-size it reads
-   * noticeably smaller than system-ui, so the base is 15px rather than 14px —
-   * matching the number, not the metric, would have shrunk every message.
-   *
-   * The fallback list matters more than usual: the face is fetched from Google
-   * on first open, so the first paint of every panel uses it.
+   * Jost replaces Josefin Sans for UI text; Cormorant Garamond carries
+   * display type and product names; Space Mono is small uppercase labels
+   * only. All three load lazily on first open — see loadFont() in index.tsx.
    */
-  font-family: "Josefin Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  /*
-   * 400, not 300. Josefin at 300 is beautiful on a heading and thin for a
-   * paragraph — and this widget's job is paragraphs a customer reads on a phone
-   * in daylight. Headings and product titles carry the character at 600.
-   */
+  font-family: "Jost", system-ui, -apple-system, "Segoe UI", sans-serif;
   font-weight: 400;
 }
 
@@ -79,6 +111,20 @@
  */
 
 *, *::before, *::after { box-sizing: border-box; }
+
+/* Screen-reader-only: the visual typing indicator is dots (see .nz-typing),
+   but tool-activity text ("Checking our policies…") is still real progress
+   information — kept for aria-live rather than dropped when the dots
+   replaced the old visible caption. */
+.nz-sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 .nz-launcher {
   position: fixed;
@@ -100,7 +146,7 @@
    * a pink button underneath a pink ring reads as a smudge rather than a badge.
    */
   background: transparent;
-  box-shadow: 0 4px 16px rgb(255 128 170 / 0.42);
+  box-shadow: 0 4px 16px rgb(194 86 126 / 0.42);
 }
 /* Fills the button, so the artwork IS the button rather than sitting inside it. */
 .nz-launcher svg { width: 100%; height: 100%; display: block; border-radius: 50%; }
@@ -122,18 +168,17 @@
   z-index: 2147482000;
   display: flex;
   flex-direction: column;
-  width: 380px;
+  width: 420px;
   max-width: calc(100vw - 40px);
-  height: 560px;
+  height: 760px;
   /* Never taller than the viewport. `dvh` accounts for mobile browser chrome
      that appears and disappears as you scroll — `vh` leaves the composer under
      the address bar on iOS. */
   max-height: calc(100dvh - 120px);
   background: var(--nz-bg);
   color: var(--nz-fg);
-  border: 1px solid var(--nz-border);
-  border-radius: var(--nz-radius);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.16);
+  border-radius: 22px;
+  box-shadow: var(--nz-shadow-panel);
   overflow: hidden;
 
   opacity: 0;
@@ -150,11 +195,13 @@
   .nz-panel { transition: none; }
 }
 
-@media (max-width: 480px) {
+/* <640px per the handoff (up from the previous palette's 480px) — a full-
+   screen sheet is the right call earlier on a narrower phone-width panel. */
+@media (max-width: 640px) {
   .nz-panel {
     right: 0; left: 0;
     width: 100%; max-width: 100%;
-    border-radius: 0; border: none;
+    border-radius: 22px 22px 0 0;
 
     /*
      * ⚠️ dvh IS NOT ENOUGH WHEN THE KEYBOARD OPENS.
@@ -174,58 +221,158 @@
   }
 }
 
+/* ---------------------------------------------------------------------- */
+/* Header                                                                  */
+/* ---------------------------------------------------------------------- */
+
 .nz-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 22px 16px;
+  background: linear-gradient(180deg, var(--nz-header-bg), var(--nz-header-bg-soft));
   border-bottom: 1px solid var(--nz-border);
-  background: var(--nz-surface);
 }
-.nz-header__title { font-weight: 600; font-size: 16px; letter-spacing: 0.01em; }
+.nz-header__text {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.nz-header__eyebrow {
+  font: 500 10px/1 "Jost", sans-serif;
+  letter-spacing: 0.3em;
+  color: var(--nz-label);
+}
+.nz-header__title {
+  font: 500 24px/1 "Cormorant Garamond", serif;
+  letter-spacing: -0.005em;
+  color: var(--nz-fg);
+}
+.nz-header__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.nz-header__dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--nz-online-dot);
+  flex-shrink: 0;
+  animation: nz-pulse 2.4s ease-in-out infinite;
+}
+.nz-header__caption {
+  font: 300 11px/1 "Jost", sans-serif;
+  letter-spacing: 0.04em;
+  color: var(--nz-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .nz-header__close {
-  border: none; background: none; color: var(--nz-muted);
-  font-size: 15px; cursor: pointer; padding: 4px 8px;
+  width: 32px; height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--nz-border);
+  background: var(--nz-surface);
+  border-radius: 50%;
+  color: var(--nz-muted);
+  font: 300 15px/1 "Jost", sans-serif;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.nz-header__close:hover { border-color: var(--nz-border-hover); color: var(--nz-fg); }
+@media (prefers-reduced-motion: reduce) { .nz-header__close { transition: none; } }
+
+@keyframes nz-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .35; transform: scale(.82); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nz-header__dot { animation: none; }
 }
 
+/* ---------------------------------------------------------------------- */
+/* Thread                                                                  */
+/* ---------------------------------------------------------------------- */
+
 .nz-scroll {
+  position: relative;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 14px;
+  padding: 22px 22px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: linear-gradient(var(--nz-bg), var(--nz-bg-soft));
   /* Stops a flick at the top or bottom of the list from scrolling the page
      behind it — scroll chaining is the other half of the mobile problem, and
      body-locking alone does not prevent it. */
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
-.nz-msg { margin-bottom: 12px; display: flex; flex-direction: column; }
+.nz-msg { display: flex; flex-direction: column; gap: 8px; }
 .nz-msg--customer { align-items: flex-end; }
 .nz-msg--assistant { align-items: flex-start; }
 
+/* "CONCIERGE" — the greeting only. A reply later in the thread does not
+   repeat it; the assistant's side of the conversation is already established
+   by then. */
+.nz-concierge-label {
+  font: 500 9px/1 "Space Mono", monospace;
+  letter-spacing: 0.18em;
+  color: var(--nz-label);
+  padding-left: 2px;
+}
+
 .nz-bubble {
   max-width: 88%;
-  padding: 10px 13px;
-  border-radius: var(--nz-radius);
+  padding: 16px 18px;
+  background: var(--nz-surface);
+  border: 1px solid var(--nz-border-card);
+  /* Tail corner top-left — a bubble "pointing" at the avatar/label above it. */
+  border-radius: 4px 18px 18px 18px;
+  box-shadow: var(--nz-shadow-card);
   font-size: 15px;
-  /* Looser than the 1.5 that suited system-ui. A light geometric face needs more
-     leading or the lines start to blur together in a paragraph. */
   line-height: 1.6;
   /* A long product handle or URL must wrap rather than force the panel wide. */
   overflow-wrap: anywhere;
 }
 .nz-msg--customer .nz-bubble {
-  background: var(--nz-accent);
-  color: var(--nz-on-accent);
-  box-shadow: 0 1px 2px rgb(58 44 48 / 0.08), 0 2px 8px rgb(255 128 170 / 0.24);
+  max-width: 78%;
+  background: var(--nz-user-bubble);
+  color: var(--nz-user-text);
+  border: none;
+  border-radius: 18px 4px 18px 18px;
+  padding: 12px 16px;
+  box-shadow: none;
 }
-.nz-msg--assistant .nz-bubble {
-  background: var(--nz-surface);
-  box-shadow: var(--nz-shadow);
-}
-.nz-msg--failed .nz-bubble { box-shadow: 0 0 0 1px #d97070; }
+.nz-msg--failed .nz-bubble { box-shadow: 0 0 0 1px #e4b4c1; }
 
-.nz-bubble p { margin: 0 0 8px; }
+.nz-bubble p {
+  margin: 0 0 10px;
+  font: 300 13.5px/1.65 "Jost", sans-serif;
+  color: var(--nz-body);
+}
 .nz-bubble p:last-child { margin-bottom: 0; }
-.nz-bubble ul { margin: 0 0 8px; padding-left: 18px; }
+.nz-msg--customer .nz-bubble p { font: 300 13.5px/1.55 "Jost", sans-serif; color: var(--nz-user-text); }
+
+/* The greeting's first line only — larger, display type. Message.tsx has no
+   equivalent (a streamed reply is prose throughout), so this only ever
+   matches the hand-written greeting in App.tsx. */
+.nz-bubble p.nz-bubble__lede {
+  font: 400 17px/1.5 "Cormorant Garamond", serif;
+  color: var(--nz-fg);
+  margin-bottom: 10px;
+}
+
+.nz-bubble ul { margin: 0 0 10px; padding-left: 18px; font: 300 13.5px/1.65 "Jost", sans-serif; color: var(--nz-body); }
 .nz-bubble code {
   font-family: ui-monospace, monospace; font-size: 0.9em;
   background: color-mix(in srgb, var(--nz-fg) 10%, transparent);
@@ -242,44 +389,71 @@
   text-underline-offset: 2px;
   font-weight: 600;
 }
-.nz-msg--customer .nz-bubble a { color: var(--nz-on-accent); }
+.nz-msg--customer .nz-bubble a { color: var(--nz-user-text); }
+
+/* ---------------------------------------------------------------------- */
+/* Quick actions                                                          */
+/* ---------------------------------------------------------------------- */
+
+.nz-quick-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding-left: 2px;
+}
+.nz-quick-action {
+  text-align: left;
+  background: var(--nz-surface);
+  border: 1px solid var(--nz-border-quick);
+  border-radius: 12px;
+  padding: 11px 13px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.nz-quick-action:hover { border-color: var(--nz-border-hover); background: #fffbfc; }
+.nz-quick-action:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .nz-quick-action { transition: none; } }
+.nz-quick-action__title { font: 500 13px/1.2 "Jost", sans-serif; color: var(--nz-fg); }
+.nz-quick-action__subtitle { font: 300 11px/1.3 "Jost", sans-serif; color: var(--nz-muted); }
+
+/* ---------------------------------------------------------------------- */
+/* Product cards                                                          */
+/* ---------------------------------------------------------------------- */
 
 /*
  * Two per row, square images. A customer comparing sets is comparing how they
- * LOOK, and a 64px thumbnail in a horizontal row shows almost none of that.
- * Two columns fit four products in the space one row of three used to take.
+ * LOOK, and a small thumbnail in a horizontal row shows almost none of that.
  */
 .nz-products {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 10px;
+  margin-top: 2px;
   width: 100%;
 }
 
 .nz-card {
-  display: block;
-  border-radius: 12px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border-radius: 14px;
+  padding: 9px;
   text-decoration: none;
   color: inherit;
   background: var(--nz-surface);
-  /* Shadow instead of a border. With both, the tile read as heavy and muddied
-     the pink around it. */
-  box-shadow: var(--nz-shadow-card);
+  border: 1px solid var(--nz-border-card);
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
-.nz-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 2px 4px rgb(58 44 48 / 0.08), 0 6px 16px rgb(58 44 48 / 0.1);
-}
+.nz-card:hover { transform: translateY(-2px); box-shadow: var(--nz-shadow-card); }
 .nz-card:focus-visible { outline: 2px solid var(--nz-accent-text); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .nz-card { transition: none; } }
-.nz-card__media { position: relative; aspect-ratio: 1 / 1; background: #fbe6ec; }
-.nz-card__img {
-  width: 100%; height: 100%; object-fit: cover; display: block;
-}
-.nz-card__img--empty { background: #fbe6ec; }
+
+.nz-card__media { position: relative; aspect-ratio: 1 / 1; border-radius: 9px; overflow: hidden; background: var(--nz-img-placeholder); }
+.nz-card__img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nz-card__img--empty { background: var(--nz-img-placeholder); }
 
 /*
  * Sold-out sits ON the image, not in the text row below.
@@ -298,27 +472,72 @@
   padding: 2px 7px;
   border-radius: 20px;
 }
-.nz-card__body { display: flex; flex-direction: column; min-width: 0; padding: 8px 10px 10px; }
+
+.nz-card__footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 6px;
+}
+.nz-card__info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 /* One line, truncated. "Brush-On Nail Glue (No UV Light Needed)" would wrap to
    three lines and break the alignment of every tile beside it. */
-.nz-card__title {
-  font-size: 14px; font-weight: 600; margin-bottom: 2px;
+.nz-card__name {
+  font: 500 15px/1.2 "Cormorant Garamond", serif;
+  color: var(--nz-fg);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.nz-card__price { font-size: 14px; color: var(--nz-muted); }
+.nz-card__meta {
+  font: 300 10.5px/1.3 "Jost", sans-serif;
+  letter-spacing: 0.04em;
+  color: var(--nz-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /*
- * Tables. The size chart is six columns inside a 380px panel, so it scrolls
+ * ⚠️ VISUAL ONLY THIS PASS. Styled exactly to the handoff — including the
+ * hover swap to a filled accent circle — but it is an `<a>` to the SAME
+ * product page as the rest of the card, not a cart mutation. Nothing in this
+ * codebase talks to Shopify's Cart API yet; wiring this up for real is its
+ * own piece of work, not a restyle. See ProductCard.tsx.
+ */
+.nz-card__cart {
+  width: 30px; height: 30px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid #efcedb;
+  background: #fdf1f5;
+  color: var(--nz-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.nz-card:hover .nz-card__cart,
+.nz-card__cart:hover {
+  background: var(--nz-accent);
+  border-color: var(--nz-accent);
+  color: var(--nz-on-accent);
+}
+@media (prefers-reduced-motion: reduce) { .nz-card__cart { transition: none; } }
+
+/* ---------------------------------------------------------------------- */
+/* Tables (size chart)                                                     */
+/* ---------------------------------------------------------------------- */
+
+/*
+ * The size chart is six columns inside a narrow panel, so it scrolls
  * horizontally INSIDE the bubble rather than widening the widget.
  */
 .nz-tablewrap {
   overflow-x: auto;
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   -webkit-overflow-scrolling: touch;
 }
 .nz-table {
   border-collapse: collapse;
-  font-size: 12px;
+  font: 300 12px/1.4 "Jost", sans-serif;
+  color: var(--nz-body);
   white-space: nowrap;
 }
 .nz-table th,
@@ -328,50 +547,120 @@
   border-bottom: 1px solid var(--nz-border);
 }
 .nz-table th {
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--nz-fg);
   border-bottom: 2px solid var(--nz-border);
 }
 /* The first column is the label a customer scans down — keep it legible. */
-.nz-table td:first-child { font-weight: 600; }
+.nz-table td:first-child { font-weight: 500; color: var(--nz-fg); }
 
-.nz-status { font-size: 13px; color: var(--nz-muted); min-height: 16px; padding-left: 2px; }
+/* ---------------------------------------------------------------------- */
+/* Typing indicator                                                        */
+/* ---------------------------------------------------------------------- */
+
+.nz-typing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 0 4px;
+  min-height: 16px;
+}
+.nz-typing__dot {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--nz-accent-hover);
+  animation: nz-dot 1.2s infinite;
+}
+.nz-typing__dot:nth-child(2) { animation-delay: .15s; }
+.nz-typing__dot:nth-child(3) { animation-delay: .3s; }
+@keyframes nz-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nz-typing__dot { animation: none; opacity: .7; }
+}
+
+/* "Jump to latest" — shown over the thread when a reply has continued to
+   stream while the shopper is scrolled up reading something earlier. */
+.nz-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--nz-border-hover);
+  background: var(--nz-surface);
+  color: var(--nz-accent-text);
+  font: 500 12px/1 "Jost", sans-serif;
+  padding: 8px 14px;
+  border-radius: 999px;
+  box-shadow: var(--nz-shadow-card);
+  cursor: pointer;
+  z-index: 1;
+}
+.nz-jump:hover { background: #fbeff3; }
+.nz-jump:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
+
+/* ---------------------------------------------------------------------- */
+/* Composer                                                                 */
+/* ---------------------------------------------------------------------- */
+
+.nz-composer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 22px 16px;
+  background: linear-gradient(0deg, var(--nz-header-bg), var(--nz-header-bg-soft));
+  border-top: 1px solid var(--nz-border);
+}
 
 .nz-composer {
-  display: flex; gap: 8px; align-items: flex-end;
-  padding: 10px; border-top: 1px solid var(--nz-border);
-  background: var(--nz-surface);
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--nz-composer-rule);
+  padding-bottom: 9px;
 }
 
 .nz-input {
   flex: 1;
   resize: none;
-  border: 1px solid var(--nz-border);
-  border-radius: 10px;
-  padding: 9px 11px;
+  border: none;
+  background: transparent;
+  padding: 0;
   /* ⚠️ 16px MINIMUM. iOS Safari zooms the whole page when a focused input has
      a smaller font size, which on a storefront looks like the widget broke
-     the layout. */
-  font: inherit;
-  font-size: 16px;
-  line-height: 1.4;
-  background: var(--nz-bg);
+     the layout. The handoff's 14px is a design spec for desktop; this widget
+     also has to work on a phone, so the floor wins. */
+  font: 300 16px/1.4 "Jost", sans-serif;
   color: var(--nz-fg);
   max-height: 120px;
 }
-.nz-input:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: -1px; }
+.nz-input::placeholder { color: var(--nz-muted); }
+.nz-input:focus-visible { outline: none; }
 
 .nz-send {
-  width: 38px; height: 38px; flex-shrink: 0;
+  width: 34px; height: 34px; flex-shrink: 0;
   border: none; border-radius: 50%;
   background: var(--nz-accent); color: var(--nz-on-accent);
-  font-size: 16px; cursor: pointer;
-  box-shadow: 0 2px 8px rgb(255 128 170 / 0.38);
+  font-size: 15px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--nz-shadow-send);
+  transition: background 120ms ease;
 }
+.nz-send:hover:not(:disabled) { background: var(--nz-accent-hover); }
 .nz-send:disabled { opacity: 0.4; cursor: default; }
-.nz-send--stop { background: var(--nz-muted); }
+.nz-send--stop { background: var(--nz-muted); box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .nz-send { transition: none; } }
 
 .nz-footer {
-  margin: 0; padding: 0 12px 10px;
-  background: var(--nz-surface);
-  font-size: 11px; color: var(--nz-muted); text-align: center;
+  margin: 0;
+  font: 300 10.5px/1.5 "Jost", sans-serif;
+  letter-spacing: 0.02em;
+  color: var(--nz-muted);
+  text-align: center;
+  text-wrap: pretty;
 }

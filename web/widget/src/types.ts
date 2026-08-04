@@ -8,6 +8,8 @@ export interface ProductRef {
   readonly url: string;
   readonly imageUrl: string | null;
   readonly available: boolean;
+  /** Pre-formatted "Shape · Finish" by the server, e.g. "Almond · Gloss". Null when neither is known. */
+  readonly meta: string | null;
 }
 
 export interface ChatMessage {

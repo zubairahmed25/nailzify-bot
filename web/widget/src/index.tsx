@@ -27,7 +27,8 @@ const HOST_ID = "nailzify-concierge";
 const FONT_ID = "nailzify-concierge-font";
 
 /**
- * Load Josefin Sans.
+ * Load Cormorant Garamond, Jost and Space Mono — the "Atelier" redesign's
+ * three faces (design_handoff_ai_concierge), replacing Josefin Sans.
  *
  * ⚠️ THIS MUST GO IN document.head, NOT THE SHADOW ROOT. `@font-face` is
  * resolved against the DOCUMENT, not the shadow tree — a face declared inside
@@ -56,10 +57,14 @@ export function loadFont(): void {
   const link = document.createElement("link");
   link.id = FONT_ID;
   link.rel = "stylesheet";
-  // Only the two weights actually used. Requesting a face that is never rendered
-  // costs the customer a download for nothing.
+  // Only the weights actually used, across all three faces. Requesting a
+  // weight that is never rendered costs the customer a download for nothing.
   link.href =
-    "https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600&display=swap";
+    "https://fonts.googleapis.com/css2?" +
+    "family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400" +
+    "&family=Jost:wght@300;400;500" +
+    "&family=Space+Mono:wght@500" +
+    "&display=swap";
   document.head.appendChild(link);
 }
 

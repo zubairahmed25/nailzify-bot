@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CustomerId, MessageId, SessionId } from "../domain/shared/brand.js";
+import { CustomerId, MessageId, ProductHandle, ProductId, SessionId } from "../domain/shared/brand.js";
+import { money } from "../domain/shared/money.js";
 import type { Message } from "../domain/conversation/message.js";
 import { createSession, type Session } from "../domain/conversation/session.js";
+import type { Product, ProductAttributes } from "../domain/catalog/product.js";
 import type {
   Clock,
   ConversationRepository,
@@ -10,7 +12,7 @@ import type {
   LlmRequest,
 } from "../ports/index.js";
 import { fixedClock } from "../ports/index.js";
-import { createHandleMessage, type ChatEvent } from "./handle-message.js";
+import { createHandleMessage, toDisplayProduct, type ChatEvent } from "./handle-message.js";
 import { newTurnArtifacts, type ToolRegistry } from "./tool-registry.js";
 import { TOOLS } from "../prompts/tools.js";
 
@@ -404,5 +406,76 @@ describe("conversation memory", () => {
     const sent = llm.seen[0]!.messages.map((m) => m.content);
     expect(sent).toContain("almond nails?");
     expect(sent.at(-1)).toBe("do you ship to the UK?");
+  });
+});
+
+describe("toDisplayProduct", () => {
+  const attrs = (overrides: Partial<ProductAttributes> = {}): ProductAttributes => ({
+    kind: "nail-set",
+    tags: [],
+    shape: "almond",
+    length: "short",
+    finishes: ["gloss"],
+    occasions: [],
+    suitableFor: [],
+    colourNotes: [],
+    style: "Chrome",
+    ...overrides,
+  });
+
+  const testProduct = (attributes: ProductAttributes): Product => ({
+    id: ProductId("p1"),
+    handle: ProductHandle("handle-p1"),
+    title: "Sea Shell",
+    description: "",
+    productType: "",
+    url: "https://nailzify.com/products/sea-shell",
+    imageUrl: null,
+    price: money(1299, "USD"),
+    available: true,
+    variants: [],
+    attributes,
+    fetchedAt: NOW,
+  });
+
+  it("joins shape and finishes as a pre-formatted, capitalised meta string", () => {
+    const result = toDisplayProduct(testProduct(attrs({ shape: "almond", finishes: ["gloss"] })));
+
+    expect(result.meta).toBe("Almond · Gloss");
+  });
+
+  it("joins multiple finishes with a slash", () => {
+    // ⚠️ finishes is a LIST, not a scalar — Shopify's own metafield is
+    // multi-valued (product.ts), and two live products carry two finishes at
+    // once. Modelling this as one value would silently drop the second.
+    const result = toDisplayProduct(testProduct(attrs({ finishes: ["gloss", "metallic"] })));
+
+    expect(result.meta).toBe("Almond · Gloss/Metallic");
+  });
+
+  it("omits the shape segment when unknown", () => {
+    const result = toDisplayProduct(testProduct(attrs({ shape: null })));
+
+    expect(result.meta).toBe("Gloss");
+  });
+
+  it("omits the finish segment when none are known", () => {
+    const result = toDisplayProduct(testProduct(attrs({ finishes: [] })));
+
+    expect(result.meta).toBe("Almond");
+  });
+
+  it("is null when neither shape nor finish is known — not an empty string", () => {
+    // Null, not "", so the widget can tell "nothing to show" from "showed an
+    // empty label" and fall back to price alone rather than a stray " · $12.99".
+    const result = toDisplayProduct(testProduct(attrs({ shape: null, finishes: [] })));
+
+    expect(result.meta).toBeNull();
+  });
+
+  it("pre-formats price the same way regardless of meta", () => {
+    const result = toDisplayProduct(testProduct(attrs()));
+
+    expect(result.price).toBe("$12.99");
   });
 });

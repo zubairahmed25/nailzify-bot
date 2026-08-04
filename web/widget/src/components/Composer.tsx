@@ -36,7 +36,7 @@ export function Composer({
         rows={1}
         value={value}
         maxLength={MAX_LENGTH}
-        placeholder="Ask about sizing, shapes, returns…"
+        placeholder="Ask about shapes, fit, wear time, returns…"
         aria-label="Message"
         onInput={(e) => {
           const el = e.currentTarget;

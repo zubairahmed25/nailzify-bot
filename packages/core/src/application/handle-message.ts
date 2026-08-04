@@ -105,11 +105,33 @@ export interface DisplayProduct {
   readonly url: string;
   readonly imageUrl: string | null;
   readonly available: boolean;
+  /**
+   * Pre-formatted "Shape · Finish", e.g. "Almond · Gloss" — same reasoning as
+   * `price`: composed here, once, from typed attributes, rather than left for
+   * the widget to assemble from raw fields. Null when neither is known
+   * (`attributes.shape` is null and `attributes.finishes` is empty), which is
+   * common — metafields are filled in per-product, not guaranteed.
+   */
+  readonly meta: string | null;
 }
 
 function dedupeById(products: readonly Product[]): readonly Product[] {
   const seen = new Set<string>();
   return products.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+}
+
+/** "almond" -> "Almond". Every value in NailShape/NailFinish is one lowercase word. */
+function capitalize(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+function formatMeta(product: Product): string | null {
+  const parts: string[] = [];
+  if (product.attributes.shape) parts.push(capitalize(product.attributes.shape));
+  if (product.attributes.finishes.length > 0) {
+    parts.push(product.attributes.finishes.map(capitalize).join("/"));
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 export function toDisplayProduct(product: Product): DisplayProduct {
@@ -120,6 +142,7 @@ export function toDisplayProduct(product: Product): DisplayProduct {
     url: product.url,
     imageUrl: product.imageUrl,
     available: product.available,
+    meta: formatMeta(product),
   };
 }
 
