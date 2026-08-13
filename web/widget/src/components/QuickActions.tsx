@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { QUICK_ACTIONS, type QuickActionDefinition } from "../quick-actions.js";
 
 /**
  * A single-path nail glyph, next to "Help me choose" only — that's the one
@@ -27,24 +28,13 @@ function NailIcon() {
  * asked to still see these once they'd sent a first message, so the compact
  * bar is this project's own addition, not part of the original handoff).
  *
- * Clicking either form sends the action's TITLE as the customer's message,
- * verbatim — the same `send()` every typed question goes through. There is
- * no separate "intent" wiring: a title like "Help me choose" reaches the model
- * as an ordinary message, and the system prompt's own "ask before searching
- * only when you genuinely cannot construct a query" rule is what turns that
- * into a clarifying question rather than a blind search.
+ * Each pill carries a stable intent as well as its customer-facing title. The
+ * title remains the visible transcript text, while the server owns the fixed
+ * workflow or search plan behind the intent. Typed composer messages still use
+ * the open model-selected path.
  */
-const ACTIONS: readonly { title: string; subtitle: string; icon?: boolean }[] = [
-  { title: "Help me choose", subtitle: "Shape, length, occasion", icon: true },
-  { title: "Current promos", subtitle: "Bundles, offers, free shipping" },
-  { title: "Wear & care", subtitle: "Apply, reuse, remove safely" },
-  { title: "My order", subtitle: "Track, change or return" },
-  { title: "Best sellers", subtitle: "This week's most-loved sets" },
-  { title: "Other", subtitle: "Ask me anything else" },
-];
-
 interface QuickActionProps {
-  onSelect: (title: string) => void;
+  onSelect: (action: QuickActionDefinition) => void;
   disabled: boolean;
 }
 
@@ -57,13 +47,13 @@ interface QuickActionProps {
 export function QuickActions({ onSelect, disabled }: QuickActionProps) {
   return (
     <div class="nz-quick-actions">
-      {ACTIONS.map((action) => (
+      {QUICK_ACTIONS.map((action) => (
         <button
           key={action.title}
           type="button"
           class="nz-quick-action"
           disabled={disabled}
-          onClick={() => onSelect(action.title)}
+          onClick={() => onSelect(action)}
         >
           <span class="nz-quick-action__title">
             {action.title}
@@ -125,13 +115,13 @@ export function QuickActionsBar({ onSelect, disabled }: QuickActionProps) {
         role="group"
         aria-label="Quick questions"
       >
-        {ACTIONS.map((action) => (
+        {QUICK_ACTIONS.map((action) => (
           <button
             key={action.title}
             type="button"
             class="nz-quick-bar__pill"
             disabled={disabled}
-            onClick={() => onSelect(action.title)}
+            onClick={() => onSelect(action)}
           >
             {action.title}
             {action.icon && <NailIcon />}

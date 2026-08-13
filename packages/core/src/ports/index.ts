@@ -104,6 +104,11 @@ export interface LlmRequest {
    * typed alternative exists.
    */
   readonly forceTool?: string;
+  /**
+   * Keep tool definitions in the request for replayed tool results, but forbid
+   * the model from starting another tool call on this response.
+   */
+  readonly disableTools?: boolean;
 }
 
 export type LlmStreamEvent =

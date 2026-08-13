@@ -4,6 +4,10 @@ import { AgentAvatar } from "./components/AgentAvatar.js";
 import { Composer, type ComposerFocusRequest } from "./components/Composer.js";
 import { Message } from "./components/Message.js";
 import { QuickActions, QuickActionsBar } from "./components/QuickActions.js";
+import {
+  OTHER_PROMPT,
+  type QuickActionDefinition,
+} from "./quick-actions.js";
 import { loadPersistedState, savePersistedState, useChat } from "./useChat.js";
 
 function CloseIcon() {
@@ -19,7 +23,7 @@ function CloseIcon() {
 const NEAR_BOTTOM_PX = 120;
 
 export function App() {
-  const { messages, status, toolActivity, send, stop } = useChat();
+  const { messages, status, toolActivity, send, addAssistantPrompt, stop } = useChat();
   // Reopens itself after a navigation. Landing on a product page with the chat
   // closed makes it look like the conversation ended, when the customer only
   // followed a recommendation the bot gave them.
@@ -45,8 +49,12 @@ export function App() {
   // render something rather than sitting empty.
   const showTyping = status === "thinking" || toolActivity !== null;
 
-  const sendQuickAction = async (title: string) => {
-    await send(title);
+  const sendQuickAction = async (action: QuickActionDefinition) => {
+    if (action.intent === "other") {
+      addAssistantPrompt(OTHER_PROMPT);
+    } else {
+      await send(action.title, action.intent);
+    }
 
     const emphasize = !hasShownComposerCue.current;
     hasShownComposerCue.current = true;

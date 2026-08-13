@@ -34,6 +34,7 @@ import type { ProductId } from "../domain/shared/brand.js";
 import type { Clock, ConversationRepository, LlmClient } from "../ports/index.js";
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION } from "../prompts/system-prompt.js";
 import { newTurnArtifacts, type ToolRegistry } from "./tool-registry.js";
+import { quickActionPlan, type QuickActionIntent } from "./quick-actions.js";
 
 /**
  * Cap on tool round trips within one turn.
@@ -60,6 +61,7 @@ export interface HandleMessageCommand {
   readonly customerId: CustomerId | null;
   readonly messageId: MessageId;
   readonly text: string;
+  readonly quickAction?: QuickActionIntent;
 }
 
 /** Streamed to the widget over SSE. */
@@ -182,7 +184,13 @@ export function createHandleMessage(deps: HandleMessageDeps) {
     const window = buildWindow(history, session.summary, windowPolicy);
 
     const incoming = userMessage(command.messageId, command.text, now);
-    const messages: Message[] = [...window.messages, incoming];
+    const plan = command.quickAction
+      ? quickActionPlan(command.quickAction, `quick-${command.quickAction}-${command.messageId}`)
+      : null;
+    const modelIncoming = plan
+      ? userMessage(command.messageId, plan.modelText, now)
+      : incoming;
+    const messages: Message[] = [...window.messages, modelIncoming];
 
     // ---- 4. The tool loop ----------------------------------------------------
     const artifacts = newTurnArtifacts();
@@ -190,6 +198,19 @@ export function createHandleMessage(deps: HandleMessageDeps) {
 
     let answer = "";
     let hops = 0;
+
+    // A pill is a command, not an ambiguous chat phrase. Execute its lookup
+    // with server-owned arguments before the model writes anything. The model
+    // receives the result but no tool definitions on this turn, so it cannot
+    // replace the stable lookup with a context-dependent second search.
+    if (plan?.toolCall) {
+      yield { type: "tool_started", name: plan.toolCall.name };
+      const outcome = await deps.tools.execute(plan.toolCall, artifacts);
+      messages.push(
+        assistantMessage(nextId("a"), "", deps.clock.now(), { toolCalls: [plan.toolCall] }),
+        toolResultTurn([outcome], deps.clock.now()),
+      );
+    }
 
     for (;;) {
       const toolCalls: ToolCall[] = [];
@@ -200,6 +221,7 @@ export function createHandleMessage(deps: HandleMessageDeps) {
         model: "chat",
         system: SYSTEM_PROMPT,
         tools: deps.tools.definitions(),
+        ...(command.quickAction ? { disableTools: true } : {}),
         messages,
         maxTokens,
         // The system prompt and tool definitions are byte-stable across every

@@ -156,6 +156,26 @@ describe("forceTool", () => {
   });
 });
 
+describe("disableTools", () => {
+  it("keeps tool definitions but prevents the model from calling them", async () => {
+    const { llm, sent } = make({});
+    const tools = [
+      {
+        name: "search_knowledge_base",
+        description: "Search company guides.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ];
+
+    await llm.complete({ ...baseRequest, tools, disableTools: true });
+
+    expect((sent() as unknown as { tools?: unknown[] }).tools).toHaveLength(1);
+    expect((sent() as unknown as { tool_choice?: unknown }).tool_choice).toEqual({
+      type: "none",
+    });
+  });
+});
+
 describe("prompt caching", () => {
   it("marks the system prompt as a cacheable prefix when asked", async () => {
     const { llm, sent } = make({});

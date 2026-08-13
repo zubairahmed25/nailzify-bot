@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CustomerId, MessageId, ProductHandle, ProductId, SessionId } from "../domain/shared/brand.js";
 import { money } from "../domain/shared/money.js";
-import type { Message } from "../domain/conversation/message.js";
+import type { Message, ToolCall } from "../domain/conversation/message.js";
 import { createSession, type Session } from "../domain/conversation/session.js";
 import type { Product, ProductAttributes } from "../domain/catalog/product.js";
 import type {
@@ -87,11 +87,13 @@ function fakeTools(
   opts: { escalateOn?: string; throwOn?: string } = {},
 ) {
   const calls: string[] = [];
+  const toolCalls: ToolCall[] = [];
 
   const tools: ToolRegistry = {
     definitions: () => TOOLS,
     execute: async (call, artifacts) => {
       calls.push(call.name);
+      toolCalls.push(call);
       if (opts.escalateOn === call.name) {
         artifacts.escalated = true;
         artifacts.escalationSummary = "customer wants a refund";
@@ -108,7 +110,7 @@ function fakeTools(
     },
   };
 
-  return { tools, calls };
+  return { tools, calls, toolCalls };
 }
 
 async function collect(events: AsyncIterable<ChatEvent>): Promise<ChatEvent[]> {
@@ -128,6 +130,7 @@ function build(opts: {
   toolOpts?: { escalateOn?: string; throwOn?: string };
   maxToolHops?: number;
   clock?: Clock;
+  command?: Partial<Parameters<ReturnType<typeof createHandleMessage>>[0]>;
 }) {
   const llm = fakeLlm(opts.turns ?? [[text("hello"), doneEvent()]]);
   const repo = fakeRepo(opts.session, opts.history ?? []);
@@ -149,11 +152,96 @@ function build(opts: {
         customerId: CustomerId("c1"),
         messageId: MessageId("m1"),
         text: "do you ship to the UK?",
+        ...opts.command,
       }),
     );
 
   return { run, llm, repo, tools };
 }
+
+describe("stable quick action intents", () => {
+  it("uses the canonical wear and care lookup after the product preference flow", async () => {
+    const history: Message[] = [
+      {
+        id: MessageId("customer-help-choose"),
+        role: "user",
+        content: "Help me choose",
+        createdAt: NOW - 2,
+      },
+      {
+        id: MessageId("assistant-preference-question"),
+        role: "assistant",
+        content: "Which shape or occasion do you have in mind?",
+        createdAt: NOW - 1,
+      },
+    ];
+    const { run, tools, llm } = build({
+      history,
+      command: { text: "Wear & care", quickAction: "wear_care" },
+      toolResponses: {
+        search_knowledge_base:
+          '<retrieved_knowledge><source document="Wear and Care Guide">Follow the guide.</source></retrieved_knowledge>',
+      },
+      turns: [[text("Follow the Wear and Care Guide."), doneEvent()]],
+    });
+
+    await run();
+
+    expect(tools.toolCalls).toEqual([
+      expect.objectContaining({
+        name: "search_knowledge_base",
+        input: {
+          query:
+            "how to apply, wear, care for, reuse, and safely remove Nailzify press-on nails",
+          docType: "guide",
+        },
+      }),
+    ]);
+    expect(llm.seen[0]?.tools).toEqual(TOOLS);
+    expect(llm.seen[0]?.disableTools).toBe(true);
+    expect(llm.seen[0]?.messages.some((message) => message.toolResults?.length)).toBe(true);
+  });
+
+  it("keeps typed messages on the open model selected tool path", async () => {
+    const { run, tools, llm } = build({
+      command: { text: "How do I remove these safely?" },
+      turns: [
+        [
+          toolUse("typed-search", "search_knowledge_base", {
+            query: "safe removal instructions",
+            docType: "guide",
+          }),
+          doneEvent("tool_use"),
+        ],
+        [text("Use the guide instructions."), doneEvent()],
+      ],
+    });
+
+    await run();
+
+    expect(llm.seen[0]?.tools).toEqual(TOOLS);
+    expect(tools.toolCalls[0]?.input).toEqual({
+      query: "safe removal instructions",
+      docType: "guide",
+    });
+  });
+
+  it("starts help me choose without searching before the customer gives a preference", async () => {
+    const { run, tools, llm } = build({
+      command: { text: "Help me choose", quickAction: "help_choose" },
+      turns: [[text("What shape or occasion do you have in mind?"), doneEvent()]],
+    });
+
+    await run();
+
+    expect(tools.calls).toEqual([]);
+    expect(llm.seen[0]?.tools).toEqual(TOOLS);
+    expect(llm.seen[0]?.disableTools).toBe(true);
+    expect(llm.seen[0]?.messages.at(-1)?.content).toContain(
+      "Ask me one concise question",
+    );
+  });
+});
 
 // ---------------------------------------------------------------------------
 

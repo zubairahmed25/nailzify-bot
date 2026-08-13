@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readSse } from "./sse.js";
 import type { ChatMessage } from "./types.js";
+import type { ServerQuickActionIntent } from "./quick-actions.js";
 import {
   loadPersistedState,
   loadSessionId,
@@ -55,7 +56,7 @@ export function useChat() {
     savePersistedState({ open: loadPersistedState().open, messages });
   }, [messages]);
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, quickAction?: ServerQuickActionIntent) => {
     const trimmed = text.trim();
     if (!trimmed) return;
 
@@ -91,6 +92,7 @@ export function useChat() {
           // conditionally on this id.
           messageId: customerMessage.id,
           message: trimmed,
+          ...(quickAction ? { quickAction } : {}),
         }),
         signal: controller.signal,
       });
@@ -161,11 +163,15 @@ export function useChat() {
     }
   }, []);
 
+  const addAssistantPrompt = useCallback((text: string) => {
+    setMessages((prev) => [...prev, { id: newId(), role: "assistant", text }]);
+  }, []);
+
   const stop = useCallback(() => {
     abort.current?.abort();
     setStatus("idle");
     setToolActivity(null);
   }, []);
 
-  return { messages, status, toolActivity, send, stop };
+  return { messages, status, toolActivity, send, addAssistantPrompt, stop };
 }

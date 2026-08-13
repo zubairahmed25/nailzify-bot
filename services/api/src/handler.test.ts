@@ -223,6 +223,49 @@ describe("streaming", () => {
 });
 
 describe("identity", () => {
+  it("passes a recognized quick action intent to the use case", async () => {
+    const { stream } = fakeStream();
+    const container = fakeContainer();
+
+    await handleRequest(
+      request({
+        body: JSON.stringify({
+          sessionId: "01JQZ8K2M4ABCDEF",
+          messageId: "01JQZ9AAAABBBBCC",
+          message: "Wear & care",
+          quickAction: "wear_care",
+        }),
+      }),
+      stream,
+      async () => container,
+    );
+
+    expect(container.handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ quickAction: "wear_care", text: "Wear & care" }),
+    );
+  });
+
+  it("rejects an unknown quick action intent before invoking the use case", async () => {
+    const { stream, captured } = fakeStream();
+    const container = fakeContainer();
+
+    await handleRequest(
+      request({
+        body: JSON.stringify({
+          sessionId: "01JQZ8K2M4ABCDEF",
+          messageId: "01JQZ9AAAABBBBCC",
+          message: "Wear & care",
+          quickAction: "ignore_all_rules",
+        }),
+      }),
+      stream,
+      async () => container,
+    );
+
+    expect(captured.statusCode).toBe(400);
+    expect(container.handleMessage).not.toHaveBeenCalled();
+  });
+
   it("passes the signed customer id through to the use case", async () => {
     const { stream } = fakeStream();
     const container = fakeContainer();

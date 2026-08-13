@@ -12,10 +12,13 @@
  * waste, so these checks run before anything touches Bedrock.
  */
 
+import { isQuickActionIntent, type QuickActionIntent } from "@nailzify/core";
+
 export interface ChatRequestBody {
   readonly sessionId: string;
   readonly messageId: string;
   readonly message: string;
+  readonly quickAction?: QuickActionIntent;
 }
 
 export type ValidationResult =
@@ -52,6 +55,7 @@ export function validateChatRequest(raw: string | null | undefined): ValidationR
   const sessionId = body["sessionId"];
   const messageId = body["messageId"];
   const message = body["message"];
+  const quickAction = body["quickAction"];
 
   // IDs are client-generated, so they are untrusted input that lands in a
   // DynamoDB partition key. Constraining the character set keeps a hostile
@@ -72,5 +76,17 @@ export function validateChatRequest(raw: string | null | undefined): ValidationR
     return { ok: false, reason: `message exceeds ${MAX_MESSAGE_LENGTH} characters` };
   }
 
-  return { ok: true, value: { sessionId, messageId, message: trimmed } };
+  if (quickAction !== undefined && !isQuickActionIntent(quickAction)) {
+    return { ok: false, reason: "quickAction is not recognized" };
+  }
+
+  return {
+    ok: true,
+    value: {
+      sessionId,
+      messageId,
+      message: trimmed,
+      ...(quickAction ? { quickAction } : {}),
+    },
+  };
 }

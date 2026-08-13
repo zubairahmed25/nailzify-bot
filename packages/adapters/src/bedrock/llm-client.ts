@@ -149,7 +149,9 @@ export function createBedrockLlmClient(config: BedrockLlmConfig): LlmClient {
     // loop never sets.
     ...(request.forceTool
       ? { tool_choice: { type: "tool" as const, name: request.forceTool } }
-      : {}),
+      : request.disableTools
+        ? { tool_choice: { type: "none" as const } }
+        : {}),
     messages: request.messages.map(toAnthropicMessage),
   });
 

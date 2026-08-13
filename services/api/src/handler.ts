@@ -135,6 +135,7 @@ export async function handleRequest(
     customerId: verification.customerId ? CustomerId(verification.customerId) : null,
     messageId: MessageId(validated.value.messageId),
     text: validated.value.message,
+    ...(validated.value.quickAction ? { quickAction: validated.value.quickAction } : {}),
   });
 
   await pumpToSse(events, writer, (error) => {
