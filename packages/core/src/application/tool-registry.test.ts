@@ -16,7 +16,7 @@ import type {
 } from "../ports/index.js";
 import { fixedClock, passthroughReranker } from "../ports/index.js";
 import { createToolRegistry, newTurnArtifacts } from "./tool-registry.js";
-import { TOOL_NAMES } from "../prompts/tools.js";
+import { TOOL_NAMES, TOOLS } from "../prompts/tools.js";
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -86,10 +86,14 @@ function deps(opts: {
   byHandle?: Product | null;
   reranker?: Reranker;
   catalogThrows?: boolean;
+  onKnowledgeSearch?: (filter: Parameters<VectorStore["searchKnowledge"]>[2]) => void;
 }) {
   const vectors: VectorStore = {
     upsert: async () => {},
-    searchKnowledge: async () => opts.knowledge ?? [],
+    searchKnowledge: async (_vector, _topK, filter) => {
+      opts.onKnowledgeSearch?.(filter);
+      return opts.knowledge ?? [];
+    },
     searchProducts: async () => opts.candidates ?? [],
     deleteByDocument: async () => {},
   };
@@ -121,6 +125,29 @@ const call = (name: string, input: Record<string, unknown> = {}) => ({
 // ---------------------------------------------------------------------------
 
 describe("knowledge search formatting", () => {
+  it("searches every document type for open customer questions", async () => {
+    const seen: Parameters<VectorStore["searchKnowledge"]>[2][] = [];
+    const registry = deps({
+      knowledge: [scored(chunk("promo", "Free U.S. shipping over $25."))],
+      onKnowledgeSearch: (filter) => seen.push(filter),
+    });
+
+    await registry.execute(
+      call(TOOL_NAMES.searchKnowledge, {
+        query: "shipping is free?",
+        docType: "policy",
+      }),
+      newTurnArtifacts(),
+    );
+
+    expect(seen).toEqual([undefined]);
+  });
+
+  it("does not offer the model a document type filter", () => {
+    const knowledgeTool = TOOLS.find((tool) => tool.name === TOOL_NAMES.searchKnowledge);
+    expect(knowledgeTool?.inputSchema.properties).not.toHaveProperty("docType");
+  });
+
   it("wraps sources in a delimited block with citable ids", async () => {
     const registry = deps({ knowledge: [scored(chunk("c1", "Returns within 30 days."))] });
     const artifacts = newTurnArtifacts();

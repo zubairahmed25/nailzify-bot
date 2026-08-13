@@ -55,7 +55,8 @@ export const TOOLS: readonly ToolDefinition[] = [
       "question about the store or company that the product catalog would not answer. Do not " +
       "assume a topic is out of scope just because it is not named above — search first. " +
       "Do not answer questions in these areas from memory — you do not know Nailzify's terms " +
-      "or details unless you search for them.",
+      "or details unless you search for them. Search all uploaded documents because a fact can " +
+      "appear in a promotion, FAQ, policy, or guide regardless of its category.",
     inputSchema: {
       type: "object",
       properties: {
@@ -65,14 +66,6 @@ export const TOOLS: readonly ToolDefinition[] = [
             "What to search for, phrased as the customer's underlying question. " +
             "Resolve pronouns first: 'do those come in short?' should be searched as " +
             "'do almond press-on nails come in short length'.",
-        },
-        docType: {
-          type: "string",
-          enum: ["policy", "guide", "faq"],
-          description:
-            "Optional filter. Use 'policy' for shipping/returns terms, 'guide' for " +
-            "sizing/application/care instructions. Omit if unsure — filtering wrongly " +
-            "hides the answer.",
         },
       },
       required: ["query"],
