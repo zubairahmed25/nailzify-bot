@@ -193,7 +193,6 @@ describe("stable quick action intents", () => {
         input: {
           query:
             "how to apply, wear, care for, reuse, and safely remove Nailzify press-on nails",
-          docType: "guide",
         },
       }),
     ]);

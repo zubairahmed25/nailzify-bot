@@ -57,7 +57,6 @@ export function quickActionPlan(
           input: {
             query:
               "how to apply, wear, care for, reuse, and safely remove Nailzify press-on nails",
-            docType: "guide",
           },
         },
       };

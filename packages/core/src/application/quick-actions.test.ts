@@ -13,18 +13,14 @@ describe("quickActionPlan", () => {
     );
   });
 
-  it("uses fixed knowledge searches for promotions and wear and care", () => {
+  it("uses fixed knowledge searches without hiding uploaded documents by classification", () => {
     const promos = quickActionPlan("current_promos", "promos-call");
     const care = quickActionPlan("wear_care", "care-call");
 
     expect(promos.toolCall?.name).toBe(TOOL_NAMES.searchKnowledge);
     expect(promos.toolCall?.input["query"]).toContain("promotions");
-    expect(care.toolCall).toEqual(
-      expect.objectContaining({
-        name: TOOL_NAMES.searchKnowledge,
-        input: expect.objectContaining({ docType: "guide" }),
-      }),
-    );
+    expect(care.toolCall?.name).toBe(TOOL_NAMES.searchKnowledge);
+    expect(care.toolCall?.input["docType"]).toBeUndefined();
   });
 
   it("uses a fixed product search for best sellers", () => {
