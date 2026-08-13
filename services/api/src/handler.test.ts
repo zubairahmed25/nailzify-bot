@@ -245,6 +245,48 @@ describe("identity", () => {
     );
   });
 
+  it("recovers the intent from an exact legacy pill label", async () => {
+    const { stream } = fakeStream();
+    const container = fakeContainer();
+
+    await handleRequest(
+      request({
+        body: JSON.stringify({
+          sessionId: "01JQZ8K2M4ABCDEF",
+          messageId: "01JQZ9AAAABBBBCC",
+          message: "Wear & care",
+        }),
+      }),
+      stream,
+      async () => container,
+    );
+
+    expect(container.handleMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ quickAction: "wear_care", text: "Wear & care" }),
+    );
+  });
+
+  it("leaves normal typed questions open for model interpretation", async () => {
+    const { stream } = fakeStream();
+    const container = fakeContainer();
+
+    await handleRequest(
+      request({
+        body: JSON.stringify({
+          sessionId: "01JQZ8K2M4ABCDEF",
+          messageId: "01JQZ9AAAABBBBCC",
+          message: "Can you compare the wear guidance with the sizing guide?",
+        }),
+      }),
+      stream,
+      async () => container,
+    );
+
+    expect(container.handleMessage).toHaveBeenCalledWith(
+      expect.not.objectContaining({ quickAction: expect.anything() }),
+    );
+  });
+
   it("rejects an unknown quick action intent before invoking the use case", async () => {
     const { stream, captured } = fakeStream();
     const container = fakeContainer();

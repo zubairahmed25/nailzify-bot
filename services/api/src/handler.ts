@@ -26,7 +26,24 @@ import type { Container } from "./composition-root.js";
 import { createSseWriter, pumpToSse, type ByteSink } from "./http/sse.js";
 import { validateChatRequest } from "./http/validate.js";
 import { verifyAppProxyRequest } from "./security/verify-app-proxy.js";
-import { CustomerId, MessageId, SessionId } from "@nailzify/core";
+import {
+  CustomerId,
+  MessageId,
+  SessionId,
+  type QuickActionIntent,
+} from "@nailzify/core";
+
+/**
+ * Older Shopify theme assets sent only the visible pill label. Keep those
+ * exact labels deterministic while cached storefront bundles age out.
+ */
+const LEGACY_QUICK_ACTION_LABELS = new Map<string, QuickActionIntent>([
+  ["Help me choose", "help_choose"],
+  ["Current promos", "current_promos"],
+  ["Wear & care", "wear_care"],
+  ["My order", "my_order"],
+  ["Best sellers", "best_sellers"],
+]);
 
 /**
  * The Lambda runtime injects `awslambda` as a global — it is not importable.
@@ -127,6 +144,9 @@ export async function handleRequest(
 
   const writer = createSseWriter(stream);
 
+  const quickAction =
+    validated.value.quickAction ?? LEGACY_QUICK_ACTION_LABELS.get(validated.value.message);
+
   const events = resolved.handleMessage({
     sessionId: SessionId(validated.value.sessionId),
     // Trusted because it arrived through a verified App Proxy signature, not
@@ -135,7 +155,7 @@ export async function handleRequest(
     customerId: verification.customerId ? CustomerId(verification.customerId) : null,
     messageId: MessageId(validated.value.messageId),
     text: validated.value.message,
-    ...(validated.value.quickAction ? { quickAction: validated.value.quickAction } : {}),
+    ...(quickAction ? { quickAction } : {}),
   });
 
   await pumpToSse(events, writer, (error) => {
