@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readSse } from "./sse.js";
-import type { ChatMessage } from "./types.js";
+import type { ChatMessage, TicketConfirmationInput } from "./types.js";
 import type { ServerQuickActionIntent } from "./quick-actions.js";
 import {
   loadPersistedState,
@@ -30,6 +30,7 @@ export { loadPersistedState, savePersistedState } from "./persistence.js";
 
 /** Shopify App Proxy path. Shopify forwards this to the Lambda with an HMAC. */
 const ENDPOINT = "/apps/nailzify-chat/message";
+const TICKET_ENDPOINT = "/apps/nailzify-chat/tickets";
 
 export type Status = "idle" | "thinking" | "streaming" | "error";
 
@@ -133,7 +134,11 @@ export function useChat() {
             break;
 
           case "done":
-            updateReply({ text: accumulated, products: event.products ?? [] });
+            updateReply({
+              text: accumulated,
+              products: event.products ?? [],
+              ...(event.handoff ? { handoff: { id: event.handoff.id } } : {}),
+            });
             setStatus("idle");
             setToolActivity(null);
             break;
@@ -167,11 +172,27 @@ export function useChat() {
     setMessages((prev) => [...prev, { id: newId(), role: "assistant", text }]);
   }, []);
 
+  const submitTicket = useCallback(async (
+    escalationId: string,
+    input: TicketConfirmationInput,
+  ): Promise<{ ticketId: string }> => {
+    const response = await fetch(TICKET_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: sessionId.current, escalationId, ...input }),
+    });
+    const payload = await response.json().catch(() => ({})) as { ticketId?: string; error?: string };
+    if (!response.ok || !payload.ticketId) {
+      throw new Error(payload.error ?? "Could not create the support request");
+    }
+    return { ticketId: payload.ticketId };
+  }, []);
+
   const stop = useCallback(() => {
     abort.current?.abort();
     setStatus("idle");
     setToolActivity(null);
   }, []);
 
-  return { messages, status, toolActivity, send, addAssistantPrompt, stop };
+  return { messages, status, toolActivity, send, addAssistantPrompt, submitTicket, stop };
 }

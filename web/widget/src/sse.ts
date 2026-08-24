@@ -15,7 +15,11 @@ import type { ProductRef } from "./types.js";
 type ServerEvent =
   | { type: "token"; text: string }
   | { type: "tool_started"; name: string }
-  | { type: "done"; products?: readonly ProductRef[] }
+  | {
+      type: "done";
+      products?: readonly ProductRef[];
+      handoff?: { readonly id: string; readonly reason: string; readonly summary: string } | null;
+    }
   | { type: "refused"; reason: string };
 
 /**

@@ -3,6 +3,7 @@ import { loadFont } from "./index.js";
 import { AgentAvatar } from "./components/AgentAvatar.js";
 import { Composer, type ComposerFocusRequest } from "./components/Composer.js";
 import { Message } from "./components/Message.js";
+import { TicketConfirmation } from "./components/TicketConfirmation.js";
 import { QuickActions, QuickActionsBar } from "./components/QuickActions.js";
 import {
   OTHER_PROMPT,
@@ -23,7 +24,7 @@ function CloseIcon() {
 const NEAR_BOTTOM_PX = 120;
 
 export function App() {
-  const { messages, status, toolActivity, send, addAssistantPrompt, stop } = useChat();
+  const { messages, status, toolActivity, send, addAssistantPrompt, submitTicket, stop } = useChat();
   // Reopens itself after a navigation. Landing on a product page with the chat
   // closed makes it look like the conversation ended, when the customer only
   // followed a recommendation the bot gave them.
@@ -283,7 +284,15 @@ export function App() {
           {messages.length === 0 && <QuickActions onSelect={sendQuickAction} disabled={busy} />}
 
           {messages.map((message) => (
-            <Message key={message.id} message={message} />
+            <div key={message.id} class="nz-message-block">
+              <Message message={message} />
+              {message.handoff && (
+                <TicketConfirmation
+                  escalationId={message.handoff.id}
+                  onSubmit={submitTicket}
+                />
+              )}
+            </div>
           ))}
 
           {showTyping && (

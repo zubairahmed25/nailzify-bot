@@ -213,6 +213,9 @@ function toSessionItem(session: Session, retentionDays: number): Record<string, 
     tokensUsed: session.tokensUsed,
     summary: session.summary,
     escalated: session.escalated,
+    escalationId: session.escalationId,
+    escalationReason: session.escalationReason,
+    escalationSummary: session.escalationSummary,
     version: session.version,
     // ⚠️ EPOCH SECONDS. DynamoDB TTL silently ignores millisecond values —
     // they parse as a date ~50,000 years out, so retention quietly never
@@ -275,6 +278,9 @@ function toSession(item: Record<string, unknown>): Session {
     tokensUsed: num(item, "tokensUsed"),
     summary: typeof item["summary"] === "string" ? item["summary"] : null,
     escalated: item["escalated"] === true,
+    escalationId: typeof item["escalationId"] === "string" ? item["escalationId"] : null,
+    escalationReason: typeof item["escalationReason"] === "string" ? item["escalationReason"] : null,
+    escalationSummary: typeof item["escalationSummary"] === "string" ? item["escalationSummary"] : null,
     version: num(item, "version"),
   };
 }

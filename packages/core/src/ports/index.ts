@@ -19,12 +19,20 @@
  * That is what makes the domain test suite run in under two seconds.
  */
 
-import type { ChunkId, CustomerId, ProductHandle, ProductId, SessionId } from "../domain/shared/brand.js";
+import type { ChunkId, CustomerId, ProductHandle, ProductId, SessionId, TicketId } from "../domain/shared/brand.js";
 import type { Message } from "../domain/conversation/message.js";
 import type { Session } from "../domain/conversation/session.js";
 import type { Chunk, DocType, ScoredChunk } from "../domain/knowledge/chunk.js";
 import type { CachedProductMetadata, Product, ProductCandidate } from "../domain/catalog/product.js";
 import type { PriceBand } from "../domain/shared/money.js";
+import type {
+  Ticket,
+  TicketComment,
+  TicketEvent,
+  TicketNotificationJob,
+  TicketPriority,
+  TicketStatus,
+} from "../domain/ticket/ticket.js";
 
 // ===========================================================================
 // Clock
@@ -298,6 +306,53 @@ export interface ConversationRepository {
   appendMessages(id: SessionId, messages: readonly Message[], ttlEpochSeconds: number): Promise<void>;
 
   findSessionsByCustomer(customerId: CustomerId): Promise<readonly SessionId[]>;
+}
+
+// ===========================================================================
+// Merchant support tickets
+// ===========================================================================
+
+export interface TicketQueueQuery {
+  readonly shop: string;
+  readonly statuses: readonly TicketStatus[];
+  readonly priority?: TicketPriority;
+  readonly assigneeUserId?: string;
+  readonly cursor?: string;
+  readonly limit: number;
+}
+
+export interface TicketQueuePage {
+  readonly items: readonly Ticket[];
+  readonly cursor: string | null;
+}
+
+export interface CreateTicketRecord {
+  readonly ticket: Ticket;
+  readonly createdEvent: TicketEvent;
+  readonly notificationJobs: readonly TicketNotificationJob[];
+}
+
+export interface TicketTimeline {
+  readonly comments: readonly TicketComment[];
+  readonly events: readonly TicketEvent[];
+  readonly notificationJobs: readonly TicketNotificationJob[];
+}
+
+export interface TicketRepository {
+  /** Idempotent on shop plus escalation id. Returns the original after a retry. */
+  create(record: CreateTicketRecord): Promise<{ readonly ticket: Ticket; readonly created: boolean }>;
+  load(id: TicketId): Promise<Ticket | null>;
+  list(query: TicketQueueQuery): Promise<TicketQueuePage>;
+  loadTimeline(id: TicketId): Promise<TicketTimeline>;
+  save(ticket: Ticket, event: TicketEvent, expectedVersion: number): Promise<void>;
+  addComment(
+    ticket: Ticket,
+    comment: TicketComment,
+    event: TicketEvent,
+    job: TicketNotificationJob | null,
+    expectedVersion: number,
+  ): Promise<void>;
+  retryNotification(job: TicketNotificationJob): Promise<void>;
 }
 
 // ===========================================================================

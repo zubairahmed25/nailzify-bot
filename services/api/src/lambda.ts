@@ -12,6 +12,7 @@
 
 import {
   createDynamoConversationRepo,
+  createDynamoTicketRepo,
   createSecretsManagerProvider,
 } from "@nailzify/adapters";
 import {
@@ -78,6 +79,14 @@ async function loadConfig(): Promise<ContainerConfig> {
       tableName: required("TABLE_NAME"),
       region,
     }),
+    tickets: createDynamoTicketRepo({
+      tableName: required("TABLE_NAME"),
+      region,
+    }),
+    merchantRecipients: (process.env["MERCHANT_SUPPORT_RECIPIENTS"] ?? "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
     models: {
       chat: required("CHAT_MODEL_ID"),
       fast: required("FAST_MODEL_ID"),

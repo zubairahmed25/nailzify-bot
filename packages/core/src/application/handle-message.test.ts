@@ -96,6 +96,8 @@ function fakeTools(
       toolCalls.push(call);
       if (opts.escalateOn === call.name) {
         artifacts.escalated = true;
+        artifacts.escalationId = call.id;
+        artifacts.escalationReason = "refund request";
         artifacts.escalationSummary = "customer wants a refund";
       }
       if (opts.throwOn === call.name) {
@@ -447,7 +449,35 @@ describe("escalation", () => {
     const done = events.at(-1);
 
     expect(done?.type === "done" && done.escalated).toBe(true);
+    expect(done?.type === "done" && done.handoff).toBeTruthy();
     expect(repo.session()!.escalated).toBe(true);
+  });
+
+  it("forces a structured handoff for an explicit refund request even when the model only writes text", async () => {
+    const { run, repo, tools, llm } = build({
+      turns: [[text("Let me connect you with the team."), doneEvent()]],
+      toolOpts: { escalateOn: "escalate_to_human" },
+      command: { text: "refund" },
+    });
+
+    const events = await run();
+    const done = events.at(-1);
+
+    expect(tools.calls).toEqual(["escalate_to_human"]);
+    expect(llm.seen[0]!.disableTools).toBe(true);
+    expect(done?.type === "done" && done.handoff).toBeTruthy();
+    expect(repo.session()!.escalated).toBe(true);
+  });
+
+  it("leaves refund policy questions open for knowledge retrieval", async () => {
+    const { run, tools, llm } = build({ command: { text: "What is your refund policy?" } });
+
+    const events = await run();
+    const done = events.at(-1);
+
+    expect(tools.calls).toEqual([]);
+    expect(llm.seen[0]!.disableTools).not.toBe(true);
+    expect(done?.type === "done" && done.handoff).toBeNull();
   });
 });
 

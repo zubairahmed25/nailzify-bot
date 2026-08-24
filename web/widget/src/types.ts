@@ -19,4 +19,12 @@ export interface ChatMessage {
   /** Set once the turn completes. A streaming message has none. */
   readonly products?: readonly ProductRef[];
   readonly failed?: boolean;
+  readonly handoff?: { readonly id: string };
+}
+
+export interface TicketConfirmationInput {
+  readonly email: string;
+  readonly name: string;
+  readonly addedDetail: string;
+  readonly includeTranscript: boolean;
 }

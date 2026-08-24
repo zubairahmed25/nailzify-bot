@@ -46,6 +46,7 @@ function fakeStream() {
 function fakeContainer(events: ChatEvent[] = [{ type: "token", text: "hi" }]): Container {
   return {
     proxySecret: SECRET,
+    createTicket: vi.fn(async () => ({ ok: false, status: 409, reason: "not ready" })) as Container["createTicket"],
     handleMessage: vi.fn(async function* () {
       for (const event of events) yield event;
     }) as unknown as Container["handleMessage"],
@@ -206,6 +207,7 @@ describe("streaming", () => {
     const { stream, captured } = fakeStream();
     const container: Container = {
       proxySecret: SECRET,
+      createTicket: vi.fn(async () => ({ ok: false, status: 409, reason: "not ready" })) as Container["createTicket"],
       handleMessage: (async function* () {
         yield { type: "token", text: "partial" } as ChatEvent;
         throw new Error("Bedrock exploded");
@@ -338,6 +340,40 @@ describe("identity", () => {
     expect(container.handleMessage).toHaveBeenCalledWith(
       expect.objectContaining({ customerId: null }),
     );
+  });
+});
+
+describe("POST /tickets", () => {
+  it("creates a confirmed ticket without invoking the model", async () => {
+    const { stream, captured } = fakeStream();
+    const createTicket = vi.fn(async () => ({
+      ok: true,
+      created: true,
+      ticket: { id: "TKT-123", status: "new", createdAt: 100 },
+    })) as unknown as Container["createTicket"];
+    const container: Container = { ...fakeContainer(), createTicket };
+
+    await handleRequest(
+      request({
+        rawPath: "/apps/nailzify-chat/tickets",
+        body: JSON.stringify({
+          sessionId: "01JQZ8K2M4ABCDEF",
+          escalationId: "handoff-1",
+          email: "customer@example.com",
+          includeTranscript: true,
+        }),
+      }),
+      stream,
+      async () => container,
+    );
+
+    expect(captured.statusCode).toBe(201);
+    expect(JSON.parse(captured.body).ticketId).toBe("TKT-123");
+    expect(container.handleMessage).not.toHaveBeenCalled();
+    expect(container.createTicket).toHaveBeenCalledWith(expect.objectContaining({
+      shop: "nailzify.myshopify.com",
+      includeTranscript: true,
+    }));
   });
 });
 

@@ -12,7 +12,8 @@
 
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { createIngestionStateStore, type IngestionStateStore } from "@nailzify/adapters";
+import { createDynamoTicketRepo, createIngestionStateStore, type IngestionStateStore } from "@nailzify/adapters";
+import type { TicketRepository } from "@nailzify/core";
 
 /**
  * Where an admin upload lands. Must stay under `raw/` — that is the prefix the
@@ -37,6 +38,7 @@ export interface AdminDeps {
   readonly sessionSecret: string;
   readonly apiKey: string;
   readonly shopDomain: string;
+  readonly tickets: TicketRepository;
   /**
    * Mints a presigned PUT URL and the document id it will resolve to, from
    * the merchant's own "Purpose" text (e.g. "Returns", "About Us") — NOT a
@@ -58,6 +60,7 @@ export interface AdminConfig {
   /** How long the presigned URL is valid for. Plenty of time for a browser upload. */
   readonly uploadUrlTtlSeconds?: number;
   readonly s3?: S3Client;
+  readonly tickets?: TicketRepository;
 }
 
 export function buildAdminDeps(config: AdminConfig): AdminDeps {
@@ -87,6 +90,10 @@ export function buildAdminDeps(config: AdminConfig): AdminDeps {
     sessionSecret: config.sessionSecret,
     apiKey: config.apiKey,
     shopDomain: config.shopDomain,
+    tickets: config.tickets ?? createDynamoTicketRepo({
+      tableName: config.tableName,
+      region: config.region,
+    }),
 
     async createUploadSlot(purpose) {
       const title = purpose.trim();

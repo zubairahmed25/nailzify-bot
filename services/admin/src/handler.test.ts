@@ -3,6 +3,14 @@ import type { UploadedDocument } from "@nailzify/adapters";
 import type { AdminDeps, UploadSlot } from "./composition-root.js";
 import { handleAdminRequest, type AdminEvent } from "./handler.js";
 import { signSessionTokenForTest } from "./security/verify-session-token.js";
+import {
+  SessionId,
+  TicketEventId,
+  TicketId,
+  type Ticket,
+  type TicketNotificationJob,
+  type TicketTimeline,
+} from "@nailzify/core";
 
 const SECRET = "shpss_test_secret_value";
 const API_KEY = "12345test-api-key";
@@ -30,13 +38,48 @@ const validToken = signSessionTokenForTest(
 interface DepsOptions {
   readonly documents?: readonly UploadedDocument[];
   readonly createUploadSlotResult?: UploadSlot;
+  readonly ticket?: Ticket | null;
+  readonly ticketPage?: readonly Ticket[];
+  readonly timeline?: TicketTimeline;
 }
+
+const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
+  id: TicketId("TKT-TEST-001"),
+  shop: SHOP_DOMAIN,
+  escalationId: "handoff-1",
+  sessionId: SessionId("session-1"),
+  requesterEmail: "customer@example.com",
+  requesterEmailHash: "private-email-hash",
+  requesterName: "Taylor",
+  subject: "Shipping question",
+  reason: "Policy unavailable",
+  summary: "Customer asked whether shipping is free",
+  addedDetail: null,
+  transcript: null,
+  sourceChannel: "chat",
+  status: "new",
+  priority: "normal",
+  assigneeUserId: null,
+  followUpToTicketId: null,
+  replyTokenHash: "private-reply-token-hash",
+  createdAt: 1_700_000_000_000,
+  updatedAt: 1_700_000_000_000,
+  firstRespondedAt: null,
+  solvedAt: null,
+  closedAt: null,
+  version: 0,
+  ...overrides,
+});
 
 function deps(options: DepsOptions = {}) {
   const recordUploadStartedCalls: { documentId: string; s3Key: string; title: string }[] = [];
   const deleteUploadRecordCalls: string[] = [];
   const deleteUploadObjectCalls: string[] = [];
   const createUploadSlotCalls: string[] = [];
+  const ticketListCalls: unknown[] = [];
+  const ticketSaveCalls: unknown[][] = [];
+  const commentCalls: unknown[][] = [];
+  const retryCalls: TicketNotificationJob[] = [];
 
   const slot: UploadSlot = options.createUploadSlotResult ?? {
     documentId: "return-policy",
@@ -49,6 +92,15 @@ function deps(options: DepsOptions = {}) {
     sessionSecret: SECRET,
     apiKey: API_KEY,
     shopDomain: SHOP_DOMAIN,
+    tickets: {
+      async create(record) { return { ticket: record.ticket, created: true }; },
+      async load() { return options.ticket === undefined ? null : options.ticket; },
+      async list(query) { ticketListCalls.push(query); return { items: options.ticketPage ?? [], cursor: null }; },
+      async loadTimeline() { return options.timeline ?? { comments: [], events: [], notificationJobs: [] }; },
+      async save(...args) { ticketSaveCalls.push(args); },
+      async addComment(...args) { commentCalls.push(args); },
+      async retryNotification(job) { retryCalls.push(job); },
+    },
     state: {
       async getDocumentVersion() {
         return null;
@@ -92,6 +144,10 @@ function deps(options: DepsOptions = {}) {
     deleteUploadRecordCalls,
     deleteUploadObjectCalls,
     createUploadSlotCalls,
+    ticketListCalls,
+    ticketSaveCalls,
+    commentCalls,
+    retryCalls,
   };
 }
 
@@ -268,6 +324,138 @@ describe("DELETE /admin/api/uploads/:id", () => {
     );
 
     expect(deleteUploadObjectCalls).toEqual(["return policy"]);
+  });
+});
+
+describe("merchant ticket workspace", () => {
+  it("covers AC-3 and AC-8 by listing only the authenticated shop queue", async () => {
+    const value = ticket();
+    const { built, ticketListCalls } = deps({ ticketPage: [value] });
+
+    const result = await handleAdminRequest(event({
+      rawPath: "/admin/api/tickets",
+      rawQueryString: "status=new,open&limit=25",
+    }), built);
+
+    expect(result.statusCode).toBe(200);
+    expect(ticketListCalls).toEqual([expect.objectContaining({
+      shop: SHOP_DOMAIN,
+      statuses: ["new", "open"],
+      limit: 25,
+    })]);
+    const body = JSON.parse(result.body);
+    expect(body.items[0].id).toBe(value.id);
+    // Security boundary: operational hashes never leave the admin API.
+    expect(result.body).not.toContain("private-email-hash");
+    expect(result.body).not.toContain("private-reply-token-hash");
+  });
+
+  it("covers AC-8 by hiding a ticket that belongs to another shop", async () => {
+    const { built } = deps({ ticket: ticket({ shop: "another-shop.myshopify.com" }) });
+
+    const result = await handleAdminRequest(event({
+      rawPath: "/admin/api/tickets/TKT-TEST-001",
+    }), built);
+
+    expect(result.statusCode).toBe(404);
+  });
+
+  it("covers AC-4 by storing one valid lifecycle mutation with the merchant actor", async () => {
+    const value = ticket();
+    const { built, ticketSaveCalls } = deps({ ticket: value });
+
+    const result = await handleAdminRequest(event({
+      rawPath: `/admin/api/tickets/${value.id}`,
+      requestContext: { http: { method: "PATCH" } },
+      body: JSON.stringify({ expectedVersion: 0, status: "open" }),
+    }), built);
+
+    expect(result.statusCode).toBe(200);
+    const [updated, audit, expectedVersion] = ticketSaveCalls[0]!;
+    expect(updated).toEqual(expect.objectContaining({ status: "open", version: 1 }));
+    expect(audit).toEqual(expect.objectContaining({
+      actorType: "merchant",
+      actorId: "merchant-user-1",
+      type: "status_changed",
+    }));
+    expect(expectedVersion).toBe(0);
+  });
+
+  it("covers AC-5 by committing a public comment and queued email intent together", async () => {
+    const value = ticket({ status: "open" });
+    const { built, commentCalls } = deps({ ticket: value });
+
+    const result = await handleAdminRequest(event({
+      rawPath: `/admin/api/tickets/${value.id}/comments`,
+      requestContext: { http: { method: "POST" } },
+      body: JSON.stringify({
+        expectedVersion: 0,
+        body: "Shipping is free on orders over $25.",
+        visibility: "public",
+        nextStatus: "pending",
+      }),
+    }), built);
+
+    expect(result.statusCode).toBe(201);
+    const [updated, comment, audit, job, expectedVersion] = commentCalls[0]!;
+    expect(updated).toEqual(expect.objectContaining({ status: "pending", firstRespondedAt: expect.any(Number) }));
+    expect(comment).toEqual(expect.objectContaining({ visibility: "public", deliveryStatus: "queued" }));
+    expect(audit).toEqual(expect.objectContaining({ type: "public_reply_added" }));
+    expect(job).toEqual(expect.objectContaining({
+      recipient: "customer@example.com",
+      status: "queued",
+      commentId: expect.any(String),
+    }));
+    expect(expectedVersion).toBe(0);
+  });
+
+  it("covers AC-4 by keeping a private note inside the admin boundary", async () => {
+    const value = ticket({ status: "open" });
+    const { built, commentCalls } = deps({ ticket: value });
+
+    const result = await handleAdminRequest(event({
+      rawPath: `/admin/api/tickets/${value.id}/comments`,
+      requestContext: { http: { method: "POST" } },
+      body: JSON.stringify({
+        expectedVersion: 0,
+        body: "Check this with the fulfilment team.",
+        visibility: "private",
+        nextStatus: "hold",
+      }),
+    }), built);
+
+    expect(result.statusCode).toBe(201);
+    const [, comment, audit, job] = commentCalls[0]!;
+    expect(comment).toEqual(expect.objectContaining({ visibility: "private" }));
+    expect(audit).toEqual(expect.objectContaining({ type: "private_note_added" }));
+    expect(job).toBeNull();
+  });
+
+  it("covers AC-5 by requeueing the same failed logical notification", async () => {
+    const value = ticket({ status: "open" });
+    const failed: TicketNotificationJob = {
+      id: "job-1",
+      ticketId: value.id,
+      eventId: TicketEventId("event-1"),
+      recipientType: "customer",
+      template: "merchant-public-reply",
+      recipient: value.requesterEmail,
+      status: "failed",
+      attempts: 5,
+      createdAt: value.createdAt,
+    };
+    const { built, retryCalls } = deps({
+      ticket: value,
+      timeline: { comments: [], events: [], notificationJobs: [failed] },
+    });
+
+    const result = await handleAdminRequest(event({
+      rawPath: `/admin/api/tickets/${value.id}/notifications/${failed.id}/retry`,
+      requestContext: { http: { method: "POST" } },
+    }), built);
+
+    expect(result.statusCode).toBe(202);
+    expect(retryCalls).toEqual([failed]);
   });
 });
 

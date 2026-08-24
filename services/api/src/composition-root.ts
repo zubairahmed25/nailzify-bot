@@ -26,11 +26,14 @@ import {
   createToolRegistry,
   systemClock,
   type ConversationRepository,
+  type TicketRepository,
 } from "@nailzify/core";
+import { createTicketUseCase } from "./tickets/create-ticket.js";
 
 export interface Container {
   readonly handleMessage: ReturnType<typeof createHandleMessage>;
   readonly proxySecret: string;
+  readonly createTicket: ReturnType<typeof createTicketUseCase>;
 }
 
 export interface ContainerConfig {
@@ -44,6 +47,8 @@ export interface ContainerConfig {
   readonly proxySecret: string;
   readonly models?: ModelRoleMap;
   readonly conversations: ConversationRepository;
+  readonly tickets: TicketRepository;
+  readonly merchantRecipients: readonly string[];
   readonly onWarning?: (message: string) => void;
   readonly onUsage?: (usage: { model: string; cacheReadInputTokens: number }) => void;
 }
@@ -97,5 +102,11 @@ export function buildContainer(config: ContainerConfig): Container {
       clock: systemClock,
     }),
     proxySecret: config.proxySecret,
+    createTicket: createTicketUseCase({
+      conversations: config.conversations,
+      tickets: config.tickets,
+      merchantRecipients: config.merchantRecipients,
+      hashingSecret: config.proxySecret,
+    }),
   };
 }

@@ -690,6 +690,61 @@
 /* Composer                                                                 */
 /* ---------------------------------------------------------------------- */
 
+.nz-message-block { display: contents; }
+
+.nz-ticket-confirmation {
+  margin: 0 0 4px 34px;
+  padding: 16px;
+  border: 1px solid var(--nz-border);
+  border-radius: 18px;
+  background: var(--nz-surface);
+  box-shadow: var(--nz-shadow-card);
+  color: var(--nz-body);
+  font: 300 13px/1.45 "Jost", sans-serif;
+  display: grid;
+  gap: 12px;
+}
+.nz-ticket-confirmation__intro { display: grid; gap: 3px; }
+.nz-ticket-confirmation strong { color: var(--nz-fg); font-weight: 500; }
+.nz-ticket-confirmation label { display: grid; gap: 5px; color: var(--nz-fg); font-weight: 400; }
+.nz-ticket-confirmation input:not([type="checkbox"]),
+.nz-ticket-confirmation textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--nz-border-quick);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--nz-fg);
+  padding: 9px 10px;
+  font: 300 16px/1.35 "Jost", sans-serif;
+}
+.nz-ticket-confirmation textarea { resize: vertical; }
+.nz-ticket-confirmation input:focus-visible,
+.nz-ticket-confirmation textarea:focus-visible {
+  outline: 2px solid var(--nz-accent);
+  outline-offset: 1px;
+}
+.nz-ticket-confirmation__optional { color: var(--nz-muted); font-weight: 300; }
+.nz-ticket-confirmation__consent {
+  grid-template-columns: auto 1fr !important;
+  align-items: start;
+  color: var(--nz-body) !important;
+  font-weight: 300 !important;
+}
+.nz-ticket-confirmation__consent input { margin-top: 3px; accent-color: var(--nz-accent); }
+.nz-ticket-confirmation__error { margin: 0; color: #9b1c31; }
+.nz-ticket-confirmation button {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: var(--nz-accent);
+  color: var(--nz-on-accent);
+  font: 500 13px/1 "Jost", sans-serif;
+  cursor: pointer;
+}
+.nz-ticket-confirmation button:disabled { opacity: .55; cursor: default; }
+.nz-ticket-confirmation--success { gap: 4px; }
+
 .nz-composer-wrap {
   display: flex;
   flex-direction: column;

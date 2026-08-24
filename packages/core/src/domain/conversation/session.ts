@@ -51,6 +51,10 @@ export interface Session {
    */
   readonly summary: string | null;
   readonly escalated: boolean;
+  /** Server trusted model handoff data used by the customer confirmation flow. */
+  readonly escalationId: string | null;
+  readonly escalationReason: string | null;
+  readonly escalationSummary: string | null;
   /**
    * Optimistic-concurrency token. Two tabs posting at once would otherwise
    * interleave turns into nonsense; the repository writes conditionally on this.
@@ -72,6 +76,9 @@ export function createSession(
     tokensUsed: 0,
     summary: null,
     escalated: false,
+    escalationId: null,
+    escalationReason: null,
+    escalationSummary: null,
     version: 0,
   };
 }
@@ -130,8 +137,22 @@ export function withSummary(session: Session, summary: string): Session {
 }
 
 /** Mark as handed off. Terminal for the bot — `canAcceptTurn` will refuse after this. */
-export function escalate(session: Session, now: number): Session {
-  return { ...session, escalated: true, lastActiveAt: now, version: session.version + 1 };
+export interface SessionEscalation {
+  readonly id: string;
+  readonly reason: string;
+  readonly summary: string;
+}
+
+export function escalate(session: Session, now: number, handoff?: SessionEscalation): Session {
+  return {
+    ...session,
+    escalated: true,
+    escalationId: handoff?.id ?? session.escalationId,
+    escalationReason: handoff?.reason ?? session.escalationReason,
+    escalationSummary: handoff?.summary ?? session.escalationSummary,
+    lastActiveAt: now,
+    version: session.version + 1,
+  };
 }
 
 /** Epoch SECONDS for the DynamoDB TTL attribute (note: not milliseconds). */

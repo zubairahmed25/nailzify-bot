@@ -40,6 +40,7 @@ export interface DataStackProps extends cdk.StackProps {
 export class DataStack extends cdk.Stack {
   readonly table: dynamodb.Table;
   readonly documentsBucket: s3.Bucket;
+  readonly ticketEmailBucket: s3.Bucket;
   readonly shopifyProxySecret: secretsmanager.Secret;
   readonly shopifyStorefrontSecret: secretsmanager.Secret;
   readonly pineconeSecret: secretsmanager.Secret;
@@ -64,6 +65,7 @@ export class DataStack extends cdk.Stack {
 
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
 
       // ⚠️ NEVER auto-delete a table holding customer conversations. In dev we
       // still retain — an accidental `cdk destroy` should not be silent data
@@ -99,6 +101,16 @@ export class DataStack extends cdk.Stack {
       sortKey: { name: "GSI2SK", type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.INCLUDE,
       nonKeyAttributes: ["status", "title", "docType", "errorMessage", "s3Key", "uploadedAt", "updatedAt"],
+    });
+
+    // Ticket queue by shop, lifecycle state, and update time. Only ticket META
+    // records carry these keys. Comments, event bodies, email addresses, and
+    // transcripts never enter the index keys.
+    this.table.addGlobalSecondaryIndex({
+      indexName: "GSI3",
+      partitionKey: { name: "GSI3PK", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "GSI3SK", type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
     });
 
     // ---- Source documents -------------------------------------------------
@@ -151,6 +163,18 @@ export class DataStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
+    // Raw inbound support email exists only long enough for the receipt
+    // processor to validate and extract the new reply. It is separate from
+    // merchant PDFs so permissions and retention cannot bleed across domains.
+    this.ticketEmailBucket = new s3.Bucket(this, "TicketEmailBucket", {
+      bucketName: `nailzify-${envName}-ticket-email-${this.account}`,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      lifecycleRules: [{ id: "delete-raw-email", expiration: cdk.Duration.days(7) }],
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
     // NOTE: the widget asset bucket deliberately lives in the API stack, not
     // here. Origin Access Control attaches a bucket policy referencing the
     // CloudFront distribution, so a bucket here would make Data depend on Api
@@ -185,5 +209,6 @@ export class DataStack extends cdk.Stack {
     // ---- Outputs ----------------------------------------------------------
     new cdk.CfnOutput(this, "TableName", { value: this.table.tableName });
     new cdk.CfnOutput(this, "DocumentsBucketName", { value: this.documentsBucket.bucketName });
+    new cdk.CfnOutput(this, "TicketEmailBucketName", { value: this.ticketEmailBucket.bucketName });
   }
 }

@@ -1,4 +1,4 @@
-import type { UploadedDocument } from "./types.js";
+import type { Ticket, TicketDetail, TicketPriority, TicketStatus, UploadedDocument } from "./types.js";
 
 /**
  * Relative paths, deliberately. This page is served from the same CloudFront
@@ -91,4 +91,54 @@ export async function putFile(uploadUrl: string, file: File): Promise<void> {
 
 export async function deleteUpload(documentId: string): Promise<void> {
   await authed(`${BASE}/${encodeURIComponent(documentId)}`, { method: "DELETE" });
+}
+
+const TICKETS_BASE = "/admin/api/tickets";
+
+export async function listTickets(statuses: readonly TicketStatus[]): Promise<readonly Ticket[]> {
+  const query = new URLSearchParams({ status: statuses.join(","), limit: "100" });
+  const response = await authed(`${TICKETS_BASE}?${query}`, { method: "GET" });
+  const body = await response.json() as { items: Ticket[] };
+  return body.items;
+}
+
+export async function getTicket(id: string): Promise<TicketDetail> {
+  const response = await authed(`${TICKETS_BASE}/${encodeURIComponent(id)}`, { method: "GET" });
+  return await response.json() as TicketDetail;
+}
+
+export async function updateTicket(
+  id: string,
+  expectedVersion: number,
+  update: { status: TicketStatus } | { priority: TicketPriority } | { assigneeUserId: string | null },
+): Promise<Ticket> {
+  const response = await authed(`${TICKETS_BASE}/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedVersion, ...update }),
+  });
+  return (await response.json() as { ticket: Ticket }).ticket;
+}
+
+export async function addTicketComment(
+  id: string,
+  input: {
+    expectedVersion: number;
+    body: string;
+    visibility: "public" | "private";
+    nextStatus: TicketStatus;
+  },
+): Promise<void> {
+  await authed(`${TICKETS_BASE}/${encodeURIComponent(id)}/comments`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function retryTicketNotification(ticketId: string, jobId: string): Promise<void> {
+  await authed(
+    `${TICKETS_BASE}/${encodeURIComponent(ticketId)}/notifications/${encodeURIComponent(jobId)}/retry`,
+    { method: "POST" },
+  );
 }

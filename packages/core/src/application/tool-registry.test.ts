@@ -463,6 +463,8 @@ describe("escalation", () => {
     );
 
     expect(artifacts.escalated).toBe(true);
+    expect(artifacts.escalationId).toBeTruthy();
+    expect(artifacts.escalationReason).toBe("refund");
     expect(artifacts.escalationSummary).toBe("wants refund on #1234");
     expect(outcome.content).toContain("do not attempt to resolve");
   });

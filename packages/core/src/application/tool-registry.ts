@@ -60,6 +60,8 @@ export interface TurnArtifacts {
    */
   readonly products: Product[];
   escalated: boolean;
+  escalationId: string | null;
+  escalationReason: string | null;
   escalationSummary: string | null;
 }
 
@@ -70,6 +72,8 @@ export function newTurnArtifacts(): TurnArtifacts {
     productIds: [],
     products: [],
     escalated: false,
+    escalationId: null,
+    escalationReason: null,
     escalationSummary: null,
   };
 }
@@ -111,6 +115,8 @@ export function createToolRegistry(deps: ToolRegistryDeps): ToolRegistry {
 
           case TOOL_NAMES.escalate: {
             artifacts.escalated = true;
+            artifacts.escalationId = call.id;
+            artifacts.escalationReason = String(call.input["reason"] ?? "Human help requested");
             artifacts.escalationSummary = String(call.input["summary"] ?? "");
             return done(
               "Handoff created. Tell the customer a member of the team will follow up, " +

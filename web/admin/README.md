@@ -40,6 +40,22 @@ in memory.
 
 ## Deploying
 
+From the repository root, deploy the admin page with one command:
+
+```bash
+npm run deploy:admin
+```
+
+The command builds with the Nailzify Shopify client ID, uploads versioned assets
+first, publishes `index.html` last with the correct cache metadata, and performs a
+one time cache repair if the existing S3 object was uploaded without that metadata.
+For an unusual stale cache, force an index invalidation with
+`npm run deploy:admin -- --invalidate`.
+
+The defaults target the current Nailzify dev stack. They can be overridden with
+`NAILZIFY_AWS_PROFILE`, `NAILZIFY_AWS_REGION`, `NAILZIFY_ADMIN_BUCKET`,
+`NAILZIFY_CLOUDFRONT_DOMAIN`, and `VITE_SHOPIFY_API_KEY`.
+
 Built assets are content-hashed (`dist/assets/index-XXXX.js`) except `index.html`
 itself, which is not — this matters because unlike the widget (delivered through
 Shopify's own versioned theme CDN), this page is served through OUR CloudFront

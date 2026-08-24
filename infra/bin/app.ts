@@ -82,6 +82,15 @@ const config = {
   fastModelId: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
   embedModelId: "cohere.embed-v4:0",
   rerankModelId: "cohere.rerank-v3-5:0",
+  merchantSupportRecipients:
+    app.node.tryGetContext("merchantSupportRecipients") ?? "support@nailzify.com",
+  sesFromAddress: app.node.tryGetContext("sesFromAddress") ?? "support@nailzify.com",
+  sesIdentityDomain: app.node.tryGetContext("sesIdentityDomain") ?? "nailzify.com",
+  adminAppUrl:
+    app.node.tryGetContext("adminAppUrl") ??
+    `https://${app.node.tryGetContext("distributionDomain") ?? "d183repo6i6gjz.cloudfront.net"}/admin/index.html`,
+  supportReplyDomain:
+    app.node.tryGetContext("supportReplyDomain") ?? "support.nailzify.com",
 };
 
 const data = new DataStack(app, `Nailzify-${envName}-Data`, {
@@ -98,6 +107,7 @@ const api = new ApiStack(app, `Nailzify-${envName}-Api`, {
   storefrontSecret: data.shopifyStorefrontSecret,
   pineconeSecret: data.pineconeSecret,
   documentsBucket: data.documentsBucket,
+  ticketEmailBucket: data.ticketEmailBucket,
   ...config,
 });
 

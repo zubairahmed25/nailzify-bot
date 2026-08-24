@@ -13,6 +13,15 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as ses from "aws-cdk-lib/aws-ses";
+import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
+import * as eventSources from "aws-cdk-lib/aws-lambda-event-sources";
+import * as events from "aws-cdk-lib/aws-events";
+import * as eventTargets from "aws-cdk-lib/aws-events-targets";
+import * as sesActions from "aws-cdk-lib/aws-ses-actions";
 import type * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import type { Construct } from "constructs";
@@ -51,6 +60,12 @@ export interface ApiStackProps extends cdk.StackProps {
    * check the `aud` claim on a session token (services/admin/src/security/verify-session-token.ts).
    */
   readonly shopifyApiKey: string;
+  readonly merchantSupportRecipients: string;
+  readonly sesFromAddress: string;
+  readonly sesIdentityDomain: string;
+  readonly adminAppUrl: string;
+  readonly supportReplyDomain: string;
+  readonly ticketEmailBucket: s3.Bucket;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -144,8 +159,10 @@ export class ApiStack extends cdk.Stack {
         CHAT_MODEL_ID: props.chatModelId,
         FAST_MODEL_ID: props.fastModelId,
         PROXY_SECRET_ARN: props.proxySecret.secretArn,
+        SUPPORT_REPLY_DOMAIN: props.supportReplyDomain,
         STOREFRONT_SECRET_ARN: props.storefrontSecret.secretArn,
         PINECONE_SECRET_ARN: props.pineconeSecret.secretArn,
+        MERCHANT_SUPPORT_RECIPIENTS: props.merchantSupportRecipients,
       },
 
       tracing: lambda.Tracing.ACTIVE,
@@ -241,6 +258,226 @@ export class ApiStack extends cdk.Stack {
     // bug here should not be able to exfiltrate one.
     props.documentsBucket.grantPut(adminFn);
     props.documentsBucket.grantDelete(adminFn);
+
+    // ---- Ticket email -----------------------------------------------------
+    // Ticket changes commit to DynamoDB first. Stream dispatch then moves each
+    // durable outbox record through SQS to SES, so an email outage cannot make
+    // the customer request disappear.
+    const notificationDlq = new sqs.Queue(this, "TicketNotificationDlq", {
+      queueName: `nailzify-${envName}-ticket-email-dlq`,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+      retentionPeriod: cdk.Duration.days(14),
+    });
+    const notificationQueue = new sqs.Queue(this, "TicketNotificationQueue", {
+      queueName: `nailzify-${envName}-ticket-email`,
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+      visibilityTimeout: cdk.Duration.seconds(90),
+      deadLetterQueue: { queue: notificationDlq, maxReceiveCount: 5 },
+    });
+
+    const sesIdentity = new ses.EmailIdentity(this, "TicketEmailIdentity", {
+      identity: ses.Identity.domain(props.sesIdentityDomain),
+      mailFromDomain: `mail.${props.sesIdentityDomain}`,
+    });
+    const configurationSet = new ses.ConfigurationSet(this, "TicketEmailConfiguration", {
+      configurationSetName: `nailzify-${envName}-tickets`,
+      reputationMetrics: true,
+      sendingEnabled: true,
+      suppressionReasons: ses.SuppressionReasons.BOUNCES_AND_COMPLAINTS,
+    });
+    configurationSet.addEventDestination("TicketDeliveryEvents", {
+      destination: ses.EventDestination.eventBus(events.EventBus.fromEventBusName(
+        this,
+        "DefaultEventBus",
+        "default",
+      )),
+      events: [
+        ses.EmailSendingEvent.SEND,
+        ses.EmailSendingEvent.DELIVERY,
+        ses.EmailSendingEvent.DELIVERY_DELAY,
+        ses.EmailSendingEvent.BOUNCE,
+        ses.EmailSendingEvent.COMPLAINT,
+        ses.EmailSendingEvent.REJECT,
+        ses.EmailSendingEvent.RENDERING_FAILURE,
+      ],
+    });
+
+    const dispatcherFn = new nodejs.NodejsFunction(this, "TicketOutboxDispatcher", {
+      functionName: `nailzify-${envName}-ticket-outbox`,
+      entry: path.join(repoRoot, "services/notifications/src/dispatcher.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+      bundling: { minify: true, sourceMap: true, target: "node22", externalModules: [] },
+      environment: { TICKET_NOTIFICATION_QUEUE_URL: notificationQueue.queueUrl },
+      logGroup: new logs.LogGroup(this, "TicketOutboxDispatcherLogs", {
+        logGroupName: `/aws/lambda/nailzify-${envName}-ticket-outbox`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+    dispatcherFn.addEventSource(new eventSources.DynamoEventSource(props.table, {
+      startingPosition: lambda.StartingPosition.LATEST,
+      batchSize: 25,
+      retryAttempts: 3,
+      bisectBatchOnError: true,
+    }));
+    notificationQueue.grantSendMessages(dispatcherFn);
+
+    const emailWorkerFn = new nodejs.NodejsFunction(this, "TicketEmailWorker", {
+      functionName: `nailzify-${envName}-ticket-email`,
+      entry: path.join(repoRoot, "services/notifications/src/worker.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(60),
+      bundling: { minify: true, sourceMap: true, target: "node22", externalModules: [] },
+      environment: {
+        TABLE_NAME: props.table.tableName,
+        SES_FROM_ADDRESS: props.sesFromAddress,
+        SES_CONFIGURATION_SET: configurationSet.configurationSetName,
+        ADMIN_APP_URL: props.adminAppUrl,
+        SUPPORT_REPLY_DOMAIN: props.supportReplyDomain,
+        PROXY_SECRET_ARN: props.proxySecret.secretArn,
+      },
+      logGroup: new logs.LogGroup(this, "TicketEmailWorkerLogs", {
+        logGroupName: `/aws/lambda/nailzify-${envName}-ticket-email`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+    emailWorkerFn.addEventSource(new eventSources.SqsEventSource(notificationQueue, {
+      batchSize: 5,
+      reportBatchItemFailures: true,
+    }));
+    props.table.grantReadWriteData(emailWorkerFn);
+    emailWorkerFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["ses:SendEmail"],
+      // SES evaluates identity resources for dynamic recipients as well as the
+      // sender. Keep the resource open for customer addresses, but prevent the
+      // worker from sending as any identity other than our configured mailbox.
+      resources: ["*"],
+      conditions: {
+        StringEquals: {
+          "ses:FromAddress": props.sesFromAddress,
+        },
+      },
+    }));
+    props.proxySecret.grantRead(emailWorkerFn);
+
+    const deliveryEventsFn = new nodejs.NodejsFunction(this, "TicketDeliveryEvents", {
+      functionName: `nailzify-${envName}-ticket-delivery-events`,
+      entry: path.join(repoRoot, "services/notifications/src/delivery-events.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+      bundling: { minify: true, sourceMap: true, target: "node22", externalModules: [] },
+      environment: { TABLE_NAME: props.table.tableName },
+      logGroup: new logs.LogGroup(this, "TicketDeliveryEventsLogs", {
+        logGroupName: `/aws/lambda/nailzify-${envName}-ticket-delivery-events`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+    props.table.grantReadWriteData(deliveryEventsFn);
+    new events.Rule(this, "TicketDeliveryEventRule", {
+      eventPattern: {
+        source: ["aws.ses"],
+        detailType: ["Email Sending Event"],
+      },
+      targets: [new eventTargets.LambdaFunction(deliveryEventsFn)],
+    });
+
+    const inboundFn = new nodejs.NodejsFunction(this, "TicketInboundEmail", {
+      functionName: `nailzify-${envName}-ticket-inbound`,
+      entry: path.join(repoRoot, "services/notifications/src/inbound.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 512,
+      timeout: cdk.Duration.seconds(60),
+      bundling: { minify: true, sourceMap: true, target: "node22", externalModules: [] },
+      environment: {
+        TABLE_NAME: props.table.tableName,
+        TICKET_EMAIL_BUCKET: props.ticketEmailBucket.bucketName,
+        PROXY_SECRET_ARN: props.proxySecret.secretArn,
+        MERCHANT_SUPPORT_RECIPIENTS: props.merchantSupportRecipients,
+      },
+      logGroup: new logs.LogGroup(this, "TicketInboundEmailLogs", {
+        logGroupName: `/aws/lambda/nailzify-${envName}-ticket-inbound`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+    props.table.grantReadWriteData(inboundFn);
+    props.ticketEmailBucket.grantReadWrite(inboundFn);
+    props.ticketEmailBucket.grantDelete(inboundFn);
+    props.proxySecret.grantRead(inboundFn);
+
+    const receiptRules = new ses.ReceiptRuleSet(this, "TicketReceiptRules", {
+      receiptRuleSetName: `nailzify-${envName}-ticket-replies`,
+      dropSpam: false,
+    });
+    const ticketReplyRule = receiptRules.addRule("TicketReplies", {
+      recipients: [props.supportReplyDomain],
+      scanEnabled: true,
+      tlsPolicy: ses.TlsPolicy.REQUIRE,
+      actions: [
+        new sesActions.S3({ bucket: props.ticketEmailBucket, objectKeyPrefix: "incoming/" }),
+        new sesActions.Lambda({
+          function: inboundFn,
+          invocationType: sesActions.LambdaInvocationType.EVENT,
+        }),
+      ],
+    });
+
+    const closeSolvedFn = new nodejs.NodejsFunction(this, "CloseSolvedTickets", {
+      functionName: `nailzify-${envName}-ticket-close-solved`,
+      entry: path.join(repoRoot, "services/notifications/src/close-solved.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(60),
+      bundling: { minify: true, sourceMap: true, target: "node22", externalModules: [] },
+      environment: {
+        TABLE_NAME: props.table.tableName,
+        SHOP_DOMAIN: props.shopDomain,
+        TICKET_CLOSE_AFTER_DAYS: "7",
+      },
+      logGroup: new logs.LogGroup(this, "CloseSolvedTicketsLogs", {
+        logGroupName: `/aws/lambda/nailzify-${envName}-ticket-close-solved`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+    props.table.grantReadWriteData(closeSolvedFn);
+    new events.Rule(this, "CloseSolvedTicketsSchedule", {
+      schedule: events.Schedule.rate(cdk.Duration.hours(1)),
+      targets: [new eventTargets.LambdaFunction(closeSolvedFn)],
+    });
+
+    const dlqAlarm = new cloudwatch.Alarm(this, "TicketEmailDlqAlarm", {
+      alarmName: `nailzify-${envName}-ticket-email-dlq`,
+      metric: notificationDlq.metricApproximateNumberOfMessagesVisible(),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    dlqAlarm.addAlarmAction(new cloudwatchActions.SnsAction(
+      new sns.Topic(this, "TicketOperationsAlerts", {
+        topicName: `nailzify-${envName}-ticket-operations`,
+        enforceSSL: true,
+      }),
+    ));
 
     const adminFunctionUrl = adminFn.addFunctionUrl({
       // Same reasoning as the chat Function URL below: CloudFront cannot sign
@@ -390,5 +627,15 @@ export class ApiStack extends cdk.Stack {
     new cdk.CfnOutput(this, "FunctionName", { value: chatFn.functionName });
     new cdk.CfnOutput(this, "AdminFunctionName", { value: adminFn.functionName });
     new cdk.CfnOutput(this, "WidgetBucketName", { value: this.widgetBucket.bucketName });
+    new cdk.CfnOutput(this, "TicketEmailQueueUrl", { value: notificationQueue.queueUrl });
+    new cdk.CfnOutput(this, "TicketEmailIdentityArn", { value: sesIdentity.emailIdentityArn });
+    new cdk.CfnOutput(this, "TicketReplyMxValue", {
+      value: `10 inbound-smtp.${this.region}.amazonaws.com`,
+      description: `Publish as the MX record for ${props.supportReplyDomain}`,
+    });
+    new cdk.CfnOutput(this, "TicketReceiptRuleSetName", {
+      value: receiptRules.receiptRuleSetName,
+      description: "Check existing SES receiving rules before activating this rule set.",
+    });
   }
 }

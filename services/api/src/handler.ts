@@ -69,11 +69,12 @@ interface ResponseMetadata {
 }
 
 export interface FunctionUrlEvent {
+  readonly rawPath?: string;
   readonly rawQueryString?: string;
   readonly queryStringParameters?: Record<string, string | undefined>;
   readonly body?: string;
   readonly isBase64Encoded?: boolean;
-  readonly requestContext?: { readonly http?: { readonly method?: string } };
+  readonly requestContext?: { readonly http?: { readonly method?: string; readonly path?: string } };
 }
 
 /**
@@ -101,6 +102,15 @@ export async function handleRequest(
     stream.end();
   };
 
+  const json = (statusCode: number, value: unknown): void => {
+    const stream = awslambda.HttpResponseStream.from(responseStream, {
+      statusCode,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+    stream.write(JSON.stringify(value));
+    stream.end();
+  };
+
   if (event.requestContext?.http?.method !== "POST") {
     return reject(405, "Method not allowed");
   }
@@ -120,6 +130,44 @@ export async function handleRequest(
     // Deliberately vague. Telling an attacker *why* verification failed helps
     // them iterate; the real reason goes to logs, not the response.
     return reject(401, "Unauthorized");
+  }
+
+  const path = event.rawPath ?? event.requestContext?.http?.path ?? "";
+  if (path.endsWith("/tickets")) {
+    const rawBody = event.isBase64Encoded && event.body
+      ? Buffer.from(event.body, "base64").toString("utf8")
+      : event.body;
+    let input: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(rawBody ?? "");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      input = parsed as Record<string, unknown>;
+    } catch {
+      return reject(400, "Body is not valid JSON");
+    }
+
+    const result = await resolved.createTicket({
+      shop: verification.shop,
+      sessionId: typeof input["sessionId"] === "string" ? input["sessionId"] : "",
+      escalationId: typeof input["escalationId"] === "string" ? input["escalationId"] : "",
+      email: typeof input["email"] === "string" ? input["email"] : "",
+      ...(typeof input["name"] === "string" ? { name: input["name"] } : {}),
+      ...(typeof input["addedDetail"] === "string" ? { addedDetail: input["addedDetail"] } : {}),
+      includeTranscript: input["includeTranscript"] === true,
+    });
+    if (!result.ok) return reject(result.status, result.reason);
+    console.log(JSON.stringify({
+      event: "ticket.created",
+      ticketId: result.ticket.id,
+      shop: verification.shop,
+      created: result.created,
+      transcriptIncluded: result.ticket.transcript !== null,
+    }));
+    return json(result.created ? 201 : 200, {
+      ticketId: result.ticket.id,
+      status: result.ticket.status,
+      createdAt: result.ticket.createdAt,
+    });
   }
 
   // ---- 2. Schema. Still free. ----------------------------------------------

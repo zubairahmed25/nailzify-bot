@@ -19,6 +19,9 @@ export * from "./domain/conversation/message.js";
 export * from "./domain/conversation/session.js";
 export * from "./domain/conversation/window.js";
 
+// ---- merchant support ----
+export * from "./domain/ticket/ticket.js";
+
 // ---- knowledge plane ----
 export * from "./domain/knowledge/chunk.js";
 export * from "./domain/knowledge/chunking.js";

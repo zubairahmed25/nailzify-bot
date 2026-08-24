@@ -35,6 +35,7 @@ import type { Clock, ConversationRepository, LlmClient } from "../ports/index.js
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION } from "../prompts/system-prompt.js";
 import { newTurnArtifacts, type ToolRegistry } from "./tool-registry.js";
 import { quickActionPlan, type QuickActionIntent } from "./quick-actions.js";
+import { humanHandoffPlan } from "./human-handoff-intent.js";
 
 /**
  * Cap on tool round trips within one turn.
@@ -89,6 +90,11 @@ export type ChatEvent =
        */
       readonly products: readonly DisplayProduct[];
       readonly escalated: boolean;
+      readonly handoff: {
+        readonly id: string;
+        readonly reason: string;
+        readonly summary: string;
+      } | null;
       readonly usage: TokenUsage;
     }
   | { readonly type: "refused"; readonly reason: string };
@@ -187,6 +193,9 @@ export function createHandleMessage(deps: HandleMessageDeps) {
     const plan = command.quickAction
       ? quickActionPlan(command.quickAction, `quick-${command.quickAction}-${command.messageId}`)
       : null;
+    const directHandoff = command.quickAction
+      ? null
+      : humanHandoffPlan(command.text, `handoff-${command.messageId}`);
     const modelIncoming = plan
       ? userMessage(command.messageId, plan.modelText, now)
       : incoming;
@@ -203,11 +212,12 @@ export function createHandleMessage(deps: HandleMessageDeps) {
     // with server-owned arguments before the model writes anything. The model
     // receives the result but no tool definitions on this turn, so it cannot
     // replace the stable lookup with a context-dependent second search.
-    if (plan?.toolCall) {
-      yield { type: "tool_started", name: plan.toolCall.name };
-      const outcome = await deps.tools.execute(plan.toolCall, artifacts);
+    const serverToolCall = plan?.toolCall ?? directHandoff?.toolCall;
+    if (serverToolCall) {
+      yield { type: "tool_started", name: serverToolCall.name };
+      const outcome = await deps.tools.execute(serverToolCall, artifacts);
       messages.push(
-        assistantMessage(nextId("a"), "", deps.clock.now(), { toolCalls: [plan.toolCall] }),
+        assistantMessage(nextId("a"), "", deps.clock.now(), { toolCalls: [serverToolCall] }),
         toolResultTurn([outcome], deps.clock.now()),
       );
     }
@@ -221,7 +231,7 @@ export function createHandleMessage(deps: HandleMessageDeps) {
         model: "chat",
         system: SYSTEM_PROMPT,
         tools: deps.tools.definitions(),
-        ...(command.quickAction ? { disableTools: true } : {}),
+        ...(command.quickAction || directHandoff ? { disableTools: true } : {}),
         messages,
         maxTokens,
         // The system prompt and tool definitions are byte-stable across every
@@ -282,7 +292,18 @@ export function createHandleMessage(deps: HandleMessageDeps) {
     const spent = totals.inputTokens + totals.outputTokens;
 
     session = recordTurn(session, spent, finishedAt);
-    if (artifacts.escalated) session = escalate(session, finishedAt);
+    if (
+      artifacts.escalated &&
+      artifacts.escalationId &&
+      artifacts.escalationReason &&
+      artifacts.escalationSummary !== null
+    ) {
+      session = escalate(session, finishedAt, {
+        id: artifacts.escalationId,
+        reason: artifacts.escalationReason,
+        summary: artifacts.escalationSummary,
+      });
+    }
 
     const assistantTurn = assistantMessage(nextId("a"), answer, finishedAt, {
       citations: artifacts.citations,
@@ -302,6 +323,14 @@ export function createHandleMessage(deps: HandleMessageDeps) {
       // product would otherwise render it twice.
       products: dedupeById(artifacts.products).map(toDisplayProduct),
       escalated: artifacts.escalated,
+      handoff:
+        artifacts.escalationId && artifacts.escalationReason && artifacts.escalationSummary !== null
+          ? {
+              id: artifacts.escalationId,
+              reason: artifacts.escalationReason,
+              summary: artifacts.escalationSummary,
+            }
+          : null,
       usage: totals,
     };
   };

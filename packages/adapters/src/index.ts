@@ -43,6 +43,11 @@ export {
   type DynamoConversationRepoConfig,
 } from "./dynamodb/conversation-repo.js";
 export {
+  createDynamoTicketRepo,
+  ConcurrentTicketUpdate,
+  type DynamoTicketRepoConfig,
+} from "./dynamodb/ticket-repo.js";
+export {
   createIngestionStateStore,
   type IngestionStateStore,
   type IngestionStateConfig,

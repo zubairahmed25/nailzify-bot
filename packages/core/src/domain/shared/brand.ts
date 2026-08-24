@@ -48,6 +48,15 @@ export type ChunkId = Brand<string, "ChunkId">;
 /** Client-generated, used for idempotent writes. */
 export type MessageId = Brand<string, "MessageId">;
 
+/** Durable merchant support request created after a customer confirms handoff. */
+export type TicketId = Brand<string, "TicketId">;
+
+/** One public reply or private note in a ticket timeline. */
+export type TicketCommentId = Brand<string, "TicketCommentId">;
+
+/** Immutable audit entry for a ticket mutation. */
+export type TicketEventId = Brand<string, "TicketEventId">;
+
 /** Milliseconds since the Unix epoch. */
 export type Timestamp = Brand<number, "Timestamp">;
 
@@ -72,6 +81,11 @@ export const ProductHandle = (v: string): ProductHandle =>
 export const DocumentId = (v: string): DocumentId => nonEmpty(v, "DocumentId") as DocumentId;
 export const ChunkId = (v: string): ChunkId => nonEmpty(v, "ChunkId") as ChunkId;
 export const MessageId = (v: string): MessageId => nonEmpty(v, "MessageId") as MessageId;
+export const TicketId = (v: string): TicketId => nonEmpty(v, "TicketId") as TicketId;
+export const TicketCommentId = (v: string): TicketCommentId =>
+  nonEmpty(v, "TicketCommentId") as TicketCommentId;
+export const TicketEventId = (v: string): TicketEventId =>
+  nonEmpty(v, "TicketEventId") as TicketEventId;
 
 export const Timestamp = (v: number): Timestamp => {
   if (!Number.isFinite(v) || v < 0) throw new TypeError("Timestamp must be a positive number");
