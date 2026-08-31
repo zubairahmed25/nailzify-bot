@@ -6,85 +6,61 @@
  * someone inspects a storefront.
  *
  * ============================================================================
- * "ATELIER" REDESIGN (design_handoff_ai_concierge, direction 1a)
+ * MIDNIGHT PRISM PALETTE
  * ============================================================================
- * Palette, type and shell below follow that handoff. Two deliberate
- * departures from it, both accessibility fixes rather than taste calls — see
- * the comments at --nz-muted/--nz-label and --nz-on-accent.
+ * The structure and typography stay unchanged. Cool neutral surfaces and an
+ * indigo to plum header separate the assistant from the pink storefront.
  */
 :host {
-  /* Panel canvas and its two gradients. Bubbles/cards are --nz-surface, not
-     this — the message shape is what makes a conversation readable. */
-  --nz-bg: #fdf4f8;
-  --nz-bg-soft: #fff9fb;
-  --nz-header-bg: #fffdfe;
-  --nz-header-bg-soft: #fef5f9;
+  --nz-bg: #f8f7fc;
+  --nz-bg-soft: #fbfaff;
+  --nz-header-bg: #111827;
+  --nz-header-bg-soft: #86198f;
+  --nz-header-fg: #ffffff;
+  --nz-header-label: #e9d5ff;
+  --nz-header-control-bg: rgb(255 255 255 / 0.12);
+  --nz-header-control-bg-hover: rgb(255 255 255 / 0.2);
+  --nz-header-control-border: rgb(255 255 255 / 0.26);
+  --nz-header-control-border-hover: rgb(255 255 255 / 0.5);
+  --nz-composer-bg: #ffffff;
+  --nz-composer-bg-soft: #faf9fd;
   --nz-surface: #ffffff;
+  --nz-input-bg: #ffffff;
 
-  /* Warm near-black. Pure #000 on a pink canvas reads as a rendering fault. */
-  --nz-fg: #241d21;
-  /* Paragraph text — greeting body, message prose. 6.29:1 on white. */
-  --nz-body: #6b5c63;
+  --nz-fg: #202238;
+  --nz-body: #55566f;
+  --nz-muted: #66627a;
+  --nz-label: #6e6883;
 
-  /*
-   * ⚠️ THE HANDOFF'S OWN "muted / subtle / faint / eyebrow / mono-label"
-   * FAMILY FAILS WCAG AA — MEASURED, NOT ASSUMED. Five tokens between #8A7A81
-   * and #C0A9B1, used for real information a shopper reads (a quick-action
-   * subtitle, a product's price line, the composer's trust line), ranged from
-   * 4.05:1 down to 2.20:1 against white — the 4.5:1 floor for text under
-   * 18px. Collapsed to two darkened tones in the same warm-mauve hue rather
-   * than reproduced verbatim: the same kind of fix the previous palette's
-   * --nz-muted already needed once (it was darkened from #8c7a7e, which
-   * measured 4.04:1, for the same reason).
-   */
-  /* Secondary text: status caption, quick-action subtitles, product
-     meta/price, trust line, placeholder, close-button glyph. 5.2–5.6:1 across
-     every near-white surface this widget actually renders text on. */
-  --nz-muted: #79616b;
-  /* Small-caps micro-labels ONLY: the NAILZIFY eyebrow, the CONCIERGE tag
-     above the greeting, the mono placeholder label on an empty product
-     image. 4.7–5.1:1 — a visible step lighter than --nz-muted, just not
-     below the floor to get there. */
-  --nz-label: #816872;
-
-  --nz-accent: #c2567e;
-  --nz-accent-hover: #a03f66;
-  /*
-   * ⚠️ A SEPARATE, DARKER SHADE FOR TEXT ON WHITE — same reasoning as the
-   * previous palette's --nz-accent-text, different number. --nz-accent alone
-   * measures 4.26:1 on white: fine for an icon (send arrow, cart glyph —
-   * WCAG's non-text threshold is 3:1) but short of 4.5:1 for a sentence
-   * someone reads. Reuses the handoff's OWN hover shade rather than inventing
-   * a colour — it was already in the palette and happens to measure 6.18:1.
-   */
-  --nz-accent-text: #a03f66;
-  /*
-   * ⚠️ TEXT ON THE ACCENT IS WHITE HERE, NOT DARK — different from the
-   * previous palette, because the underlying colour is different. #C2567E is
-   * dark enough that white measures 4.26:1 on it, clearing WCAG's 3:1 floor
-   * for a UI component/icon (the send arrow, the cart glyph) — neither is a
-   * sentence of text. The previous accent, #FF80AA, could not carry white at
-   * all (2.35:1); this one can, for icon-weight content.
-   */
+  --nz-accent: #5b4bd8;
+  --nz-accent-hover: #4636b0;
+  --nz-accent-text: #4e3dba;
   --nz-on-accent: #ffffff;
 
-  --nz-border: #f5dfe8;
-  --nz-border-card: #f6e1ea;
-  --nz-border-quick: #f6dee8;
-  --nz-border-hover: #e1a9bc;
-  --nz-composer-rule: #efd5df;
+  --nz-border: #e4e1ef;
+  --nz-border-card: #e6e2f0;
+  --nz-border-quick: #d8d5eb;
+  --nz-border-hover: #958bd1;
+  --nz-composer-rule: #dcd7ed;
+  --nz-interactive-soft: #f3f1fa;
+  --nz-interactive-soft-hover: #ebe8f7;
+  --nz-danger-border: #d9a8b4;
+  --nz-danger-text: #9b1c31;
 
-  /* User bubble — dark, not pink, in this direction. 13.5:1 for its text. */
-  --nz-user-bubble: linear-gradient(135deg, #4c2432, #3a1b26);
-  --nz-user-text: #f6eef1;
+  --nz-user-bubble: linear-gradient(135deg, #111827, #312e81);
+  --nz-user-text: #f8fafc;
 
   --nz-online-dot: #6fbf8e;
-  --nz-img-placeholder: #fbe6ec;
+  --nz-img-placeholder: #ece9f7;
+  --nz-avatar-bg: #f5f3ff;
+  --nz-avatar-prism-a: #4f46e5;
+  --nz-avatar-prism-b: #a21caf;
 
-  --nz-shadow-panel: 0 32px 70px -28px rgb(60 32 44 / 0.28), 0 0 0 1px rgb(60 32 44 / 0.07);
-  --nz-shadow-card: 0 8px 22px -14px rgb(60 32 44 / 0.22);
-  --nz-shadow-send: 0 6px 16px -8px rgb(194 86 126 / 0.9);
-  --nz-shadow-composer-attention: 0 0 0 4px rgb(194 86 126 / 0.22);
+  --nz-shadow-panel: 0 32px 70px -28px rgb(49 46 129 / 0.34), 0 0 0 1px rgb(49 46 129 / 0.1);
+  --nz-shadow-card: 0 8px 22px -14px rgb(49 46 129 / 0.24);
+  --nz-shadow-send: 0 6px 16px -8px rgb(91 75 216 / 0.9);
+  --nz-shadow-launcher: 0 4px 16px rgb(79 70 229 / 0.42);
+  --nz-shadow-composer-attention: 0 0 0 4px rgb(91 75 216 / 0.22);
 
   /* A high z-index because themes and cookie banners fight over this space.
      Not 2147483647: leaving headroom means a genuinely modal element — a
@@ -147,7 +123,7 @@
    * a pink button underneath a pink ring reads as a smudge rather than a badge.
    */
   background: transparent;
-  box-shadow: 0 4px 16px rgb(194 86 126 / 0.42);
+  box-shadow: var(--nz-shadow-launcher);
 }
 /* Fills the button, so the artwork IS the button rather than sitting inside it. */
 .nz-launcher svg { width: 100%; height: 100%; display: block; border-radius: 50%; }
@@ -244,12 +220,12 @@
 .nz-header__eyebrow {
   font: 500 10px/1 "Jost", sans-serif;
   letter-spacing: 0.3em;
-  color: var(--nz-label);
+  color: var(--nz-header-label);
 }
 .nz-header__title {
   font: 500 24px/1 "Cormorant Garamond", serif;
   letter-spacing: -0.005em;
-  color: var(--nz-fg);
+  color: var(--nz-header-fg);
 }
 .nz-header__status {
   display: flex;
@@ -274,10 +250,10 @@
 .nz-header__close {
   width: 32px; height: 32px;
   flex-shrink: 0;
-  border: 1px solid var(--nz-border);
-  background: var(--nz-surface);
+  border: 1px solid var(--nz-header-control-border);
+  background: var(--nz-header-control-bg);
   border-radius: 50%;
-  color: var(--nz-muted);
+  color: var(--nz-header-fg);
   font: 300 15px/1 "Jost", sans-serif;
   cursor: pointer;
   display: flex;
@@ -285,7 +261,11 @@
   justify-content: center;
   transition: border-color 120ms ease, color 120ms ease;
 }
-.nz-header__close:hover { border-color: var(--nz-border-hover); color: var(--nz-fg); }
+.nz-header__close:hover {
+  border-color: var(--nz-header-control-border-hover);
+  background: var(--nz-header-control-bg-hover);
+  color: var(--nz-header-fg);
+}
 @media (prefers-reduced-motion: reduce) { .nz-header__close { transition: none; } }
 
 @keyframes nz-pulse {
@@ -354,7 +334,7 @@
   padding: 12px 16px;
   box-shadow: none;
 }
-.nz-msg--failed .nz-bubble { box-shadow: 0 0 0 1px #e4b4c1; }
+.nz-msg--failed .nz-bubble { box-shadow: 0 0 0 1px var(--nz-danger-border); }
 
 .nz-bubble p {
   margin: 0 0 10px;
@@ -404,7 +384,7 @@
 }
 .nz-quick-action {
   text-align: left;
-  background: var(--nz-surface);
+  background: var(--nz-interactive-soft);
   border: 1px solid var(--nz-border-quick);
   border-radius: 12px;
   padding: 11px 13px;
@@ -414,12 +394,15 @@
   gap: 3px;
   transition: border-color 120ms ease, background 120ms ease;
 }
-.nz-quick-action:hover { border-color: var(--nz-border-hover); background: #fffbfc; }
+.nz-quick-action:hover {
+  border-color: var(--nz-border-hover);
+  background: var(--nz-interactive-soft-hover);
+}
 .nz-quick-action:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .nz-quick-action { transition: none; } }
 .nz-quick-action__title {
   font: 500 13px/1.2 "Jost", sans-serif;
-  color: var(--nz-fg);
+  color: var(--nz-accent-text);
   display: flex;
   align-items: center;
   gap: 5px;
@@ -520,8 +503,8 @@
   width: 30px; height: 30px;
   flex: none;
   border-radius: 50%;
-  border: 1px solid #efcedb;
-  background: #fdf1f5;
+  border: 1px solid var(--nz-border-quick);
+  background: var(--nz-interactive-soft);
   color: var(--nz-accent);
   display: flex;
   align-items: center;
@@ -616,7 +599,7 @@
   cursor: pointer;
   z-index: 1;
 }
-.nz-jump:hover { background: #fbeff3; }
+.nz-jump:hover { background: var(--nz-interactive-soft-hover); }
 .nz-jump:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
 
 /* ---------------------------------------------------------------------- */
@@ -672,7 +655,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: transparent;
+  background: var(--nz-interactive-soft);
   border: 1px solid var(--nz-border-quick);
   border-radius: 999px;
   padding: 7px 14px;
@@ -681,7 +664,10 @@
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
 }
-.nz-quick-bar__pill:hover { background: #fbeff3; border-color: var(--nz-border-hover); }
+.nz-quick-bar__pill:hover {
+  background: var(--nz-interactive-soft-hover);
+  border-color: var(--nz-border-hover);
+}
 .nz-quick-bar__pill:disabled { opacity: 0.5; cursor: default; }
 .nz-quick-bar__pill:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .nz-quick-bar__pill { transition: none; } }
@@ -713,7 +699,7 @@
   box-sizing: border-box;
   border: 1px solid var(--nz-border-quick);
   border-radius: 10px;
-  background: #fff;
+  background: var(--nz-input-bg);
   color: var(--nz-fg);
   padding: 9px 10px;
   font: 300 16px/1.35 "Jost", sans-serif;
@@ -732,7 +718,7 @@
   font-weight: 300 !important;
 }
 .nz-ticket-confirmation__consent input { margin-top: 3px; accent-color: var(--nz-accent); }
-.nz-ticket-confirmation__error { margin: 0; color: #9b1c31; }
+.nz-ticket-confirmation__error { margin: 0; color: var(--nz-danger-text); }
 .nz-ticket-confirmation button {
   border: 0;
   border-radius: 999px;
@@ -750,7 +736,7 @@
   flex-direction: column;
   gap: 10px;
   padding: 14px 22px 16px;
-  background: linear-gradient(0deg, var(--nz-header-bg), var(--nz-header-bg-soft));
+  background: linear-gradient(0deg, var(--nz-composer-bg), var(--nz-composer-bg-soft));
   border-top: 1px solid var(--nz-border);
 }
 
