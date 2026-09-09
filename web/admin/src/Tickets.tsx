@@ -44,8 +44,8 @@ function TicketQueue({ onSelect }: { readonly onSelect: (id: string) => void }) 
       <section class="page-hero page-hero--tickets" aria-labelledby="tickets-title">
         <div class="page-hero__copy">
           <span class="eyebrow"><Icon name="inbox" /> Customer care</span>
-          <h1 id="tickets-title">Support, beautifully organized</h1>
-          <p>Every customer handoff, team reply, and delivery update lives in one calm workspace.</p>
+          <h1 id="tickets-title">Your team’s support workspace</h1>
+          <p>Review escalations, reply to customers, and keep every ticket moving from one place.</p>
         </div>
         <div class="queue-summary"><span class="queue-summary__icon"><Icon name="mail" /></span><div><strong>{loaded ? tickets.length : "…"}</strong><span>{status === "active" ? "Active conversations" : `${label(status)} tickets`}</span></div></div>
       </section>
