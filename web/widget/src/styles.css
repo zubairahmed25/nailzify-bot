@@ -6,61 +6,61 @@
  * someone inspects a storefront.
  *
  * ============================================================================
- * MIDNIGHT PRISM PALETTE
+ * ROSEWOOD BLUSH PALETTE
  * ============================================================================
- * The structure and typography stay unchanged. Cool neutral surfaces and an
- * indigo to plum header separate the assistant from the pink storefront.
+ * The structure and typography stay unchanged. Deep rosewood keeps the panel
+ * distinct while warm blush surfaces connect it to the storefront identity.
  */
 :host {
-  --nz-bg: #f8f7fc;
-  --nz-bg-soft: #fbfaff;
-  --nz-header-bg: #111827;
-  --nz-header-bg-soft: #86198f;
+  --nz-bg: #fff8fa;
+  --nz-bg-soft: #fdf6f8;
+  --nz-header-bg: #351923;
+  --nz-header-bg-soft: #9f3e5f;
   --nz-header-fg: #ffffff;
-  --nz-header-label: #e9d5ff;
+  --nz-header-label: #f8dde6;
   --nz-header-control-bg: rgb(255 255 255 / 0.12);
   --nz-header-control-bg-hover: rgb(255 255 255 / 0.2);
   --nz-header-control-border: rgb(255 255 255 / 0.26);
   --nz-header-control-border-hover: rgb(255 255 255 / 0.5);
   --nz-composer-bg: #ffffff;
-  --nz-composer-bg-soft: #faf9fd;
+  --nz-composer-bg-soft: #fdf8fa;
   --nz-surface: #ffffff;
   --nz-input-bg: #ffffff;
 
-  --nz-fg: #202238;
-  --nz-body: #55566f;
-  --nz-muted: #66627a;
-  --nz-label: #6e6883;
+  --nz-fg: #39262e;
+  --nz-body: #67575e;
+  --nz-muted: #79666e;
+  --nz-label: #725f67;
 
-  --nz-accent: #5b4bd8;
-  --nz-accent-hover: #4636b0;
-  --nz-accent-text: #4e3dba;
+  --nz-accent: #b8476b;
+  --nz-accent-hover: #9f3e5f;
+  --nz-accent-text: #983956;
   --nz-on-accent: #ffffff;
 
-  --nz-border: #e4e1ef;
-  --nz-border-card: #e6e2f0;
-  --nz-border-quick: #d8d5eb;
-  --nz-border-hover: #958bd1;
-  --nz-composer-rule: #dcd7ed;
-  --nz-interactive-soft: #f3f1fa;
-  --nz-interactive-soft-hover: #ebe8f7;
+  --nz-border: #ead7de;
+  --nz-border-card: #ead7de;
+  --nz-border-quick: #dfcbd3;
+  --nz-border-hover: #c87894;
+  --nz-composer-rule: #e2cfd6;
+  --nz-interactive-soft: #fbf2f5;
+  --nz-interactive-soft-hover: #f5e4ea;
   --nz-danger-border: #d9a8b4;
   --nz-danger-text: #9b1c31;
 
-  --nz-user-bubble: linear-gradient(135deg, #111827, #312e81);
-  --nz-user-text: #f8fafc;
+  --nz-user-bubble: linear-gradient(135deg, #351923, #8d3555);
+  --nz-user-text: #fff8fa;
 
   --nz-online-dot: #6fbf8e;
-  --nz-img-placeholder: #ece9f7;
-  --nz-avatar-bg: #f5f3ff;
-  --nz-avatar-prism-a: #4f46e5;
-  --nz-avatar-prism-b: #a21caf;
+  --nz-img-placeholder: #f4e6eb;
+  --nz-avatar-bg: #fff4f7;
+  --nz-avatar-prism-a: #b8476b;
+  --nz-avatar-prism-b: #db7c93;
 
-  --nz-shadow-panel: 0 32px 70px -28px rgb(49 46 129 / 0.34), 0 0 0 1px rgb(49 46 129 / 0.1);
-  --nz-shadow-card: 0 8px 22px -14px rgb(49 46 129 / 0.24);
-  --nz-shadow-send: 0 6px 16px -8px rgb(91 75 216 / 0.9);
-  --nz-shadow-launcher: 0 4px 16px rgb(79 70 229 / 0.42);
-  --nz-shadow-composer-attention: 0 0 0 4px rgb(91 75 216 / 0.22);
+  --nz-shadow-panel: 0 32px 70px -28px rgb(112 39 65 / 0.36), 0 0 0 1px rgb(112 39 65 / 0.1);
+  --nz-shadow-card: 0 8px 22px -14px rgb(112 39 65 / 0.24);
+  --nz-shadow-send: 0 6px 16px -8px rgb(184 71 107 / 0.9);
+  --nz-shadow-launcher: 0 4px 16px rgb(184 71 107 / 0.4);
+  --nz-shadow-composer-attention: 0 0 0 4px rgb(184 71 107 / 0.22);
 
   /* A high z-index because themes and cookie banners fight over this space.
      Not 2147483647: leaving headroom means a genuinely modal element — a
