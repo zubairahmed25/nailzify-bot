@@ -245,7 +245,7 @@ export function App() {
         ref={panel}
         class={`nz-panel${open ? " nz-panel--open" : ""}`}
         role="dialog"
-        aria-label="Nailzify chat"
+        aria-label="Shopping assistant chat"
         aria-hidden={!open}
         // `inert` removes the subtree from the tab order entirely. Hiding the
         // panel visually is not enough — without this the composer stays
@@ -256,7 +256,6 @@ export function App() {
       >
         <header class="nz-header">
           <div class="nz-header__text">
-            <span class="nz-header__eyebrow">NAILZIFY</span>
             <div class="nz-header__status" role="status">
               <span class="nz-header__dot" aria-hidden="true" />
               <span class="nz-header__title">Your Fav Nail Bestie is live!</span>
@@ -333,8 +332,7 @@ export function App() {
             placeholder={hasCustomerMessage ? "Reply" : "Ask anything.."}
           />
           <p class="nz-footer">
-            Answers are drawn from the Nailzify fit guide and store policies. Pricing and stock
-            are live.
+            Answers are drawn from the fit guide and store policies. Pricing and stock are live.
           </p>
         </div>
       </div>

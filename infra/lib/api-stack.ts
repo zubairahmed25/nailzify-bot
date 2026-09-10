@@ -37,6 +37,8 @@ export interface ApiStackProps extends cdk.StackProps {
   readonly proxySecret: secretsmanager.Secret;
   readonly storefrontSecret: secretsmanager.Secret;
   readonly pineconeSecret: secretsmanager.Secret;
+  readonly brevoApiKeySecret: secretsmanager.Secret;
+  readonly brevoWebhookSecret: secretsmanager.Secret;
   readonly shopDomain: string;
   readonly storefrontDomain: string;
   readonly pineconeIndex: string;
@@ -63,6 +65,9 @@ export interface ApiStackProps extends cdk.StackProps {
   readonly merchantSupportRecipients: string;
   readonly sesFromAddress: string;
   readonly sesIdentityDomain: string;
+  readonly ticketEmailProvider: string;
+  readonly brevoFromAddress: string;
+  readonly brevoInboundSpamScoreMax: string;
   readonly adminAppUrl: string;
   readonly supportReplyDomain: string;
   readonly ticketEmailBucket: s3.Bucket;
@@ -261,7 +266,7 @@ export class ApiStack extends cdk.Stack {
 
     // ---- Ticket email -----------------------------------------------------
     // Ticket changes commit to DynamoDB first. Stream dispatch then moves each
-    // durable outbox record through SQS to SES, so an email outage cannot make
+    // durable outbox record through SQS to the configured email provider, so an email outage cannot make
     // the customer request disappear.
     const notificationDlq = new sqs.Queue(this, "TicketNotificationDlq", {
       queueName: `nailzify-${envName}-ticket-email-dlq`,
@@ -339,6 +344,9 @@ export class ApiStack extends cdk.Stack {
       bundling: { minify: true, sourceMap: true, target: "node22", externalModules: [] },
       environment: {
         TABLE_NAME: props.table.tableName,
+        TICKET_EMAIL_PROVIDER: props.ticketEmailProvider,
+        BREVO_FROM_ADDRESS: props.brevoFromAddress,
+        BREVO_API_KEY_SECRET_ARN: props.brevoApiKeySecret.secretArn,
         SES_FROM_ADDRESS: props.sesFromAddress,
         SES_CONFIGURATION_SET: configurationSet.configurationSetName,
         ADMIN_APP_URL: props.adminAppUrl,
@@ -369,6 +377,7 @@ export class ApiStack extends cdk.Stack {
       },
     }));
     props.proxySecret.grantRead(emailWorkerFn);
+    props.brevoApiKeySecret.grantRead(emailWorkerFn);
 
     const deliveryEventsFn = new nodejs.NodejsFunction(this, "TicketDeliveryEvents", {
       functionName: `nailzify-${envName}-ticket-delivery-events`,
@@ -420,6 +429,35 @@ export class ApiStack extends cdk.Stack {
     props.ticketEmailBucket.grantReadWrite(inboundFn);
     props.ticketEmailBucket.grantDelete(inboundFn);
     props.proxySecret.grantRead(inboundFn);
+
+    const brevoWebhookFn = new nodejs.NodejsFunction(this, "BrevoTicketWebhooks", {
+      functionName: `nailzify-${envName}-brevo-ticket-webhooks`,
+      entry: path.join(repoRoot, "services/notifications/src/brevo-webhook.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+      bundling: { minify: true, sourceMap: true, target: "node22", externalModules: [] },
+      environment: {
+        TABLE_NAME: props.table.tableName,
+        PROXY_SECRET_ARN: props.proxySecret.secretArn,
+        BREVO_WEBHOOK_SECRET_ARN: props.brevoWebhookSecret.secretArn,
+        BREVO_INBOUND_SPAM_SCORE_MAX: props.brevoInboundSpamScoreMax,
+        MERCHANT_SUPPORT_RECIPIENTS: props.merchantSupportRecipients,
+      },
+      logGroup: new logs.LogGroup(this, "BrevoTicketWebhooksLogs", {
+        logGroupName: `/aws/lambda/nailzify-${envName}-brevo-ticket-webhooks`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+    props.table.grantReadWriteData(brevoWebhookFn);
+    props.proxySecret.grantRead(brevoWebhookFn);
+    props.brevoWebhookSecret.grantRead(brevoWebhookFn);
+    const brevoWebhookUrl = brevoWebhookFn.addFunctionUrl({
+      authType: lambda.FunctionUrlAuthType.NONE,
+    });
 
     const receiptRules = new ses.ReceiptRuleSet(this, "TicketReceiptRules", {
       receiptRuleSetName: `nailzify-${envName}-ticket-replies`,
@@ -628,6 +666,22 @@ export class ApiStack extends cdk.Stack {
     new cdk.CfnOutput(this, "AdminFunctionName", { value: adminFn.functionName });
     new cdk.CfnOutput(this, "WidgetBucketName", { value: this.widgetBucket.bucketName });
     new cdk.CfnOutput(this, "TicketEmailQueueUrl", { value: notificationQueue.queueUrl });
+    new cdk.CfnOutput(this, "BrevoDeliveryWebhookUrl", {
+      value: `${brevoWebhookUrl.url}delivery`,
+      description: "Create the Brevo transactional webhook with bearer authentication at this URL.",
+    });
+    new cdk.CfnOutput(this, "BrevoInboundWebhookUrl", {
+      value: `${brevoWebhookUrl.url}inbound`,
+      description: `Create the Brevo inbound webhook for ${props.supportReplyDomain} at this URL.`,
+    });
+    new cdk.CfnOutput(this, "BrevoReplyMxPrimary", {
+      value: "10 inbound1.sendinblue.com.",
+      description: `Publish as the first MX record for ${props.supportReplyDomain}`,
+    });
+    new cdk.CfnOutput(this, "BrevoReplyMxSecondary", {
+      value: "20 inbound2.sendinblue.com.",
+      description: `Publish as the second MX record for ${props.supportReplyDomain}`,
+    });
     new cdk.CfnOutput(this, "TicketEmailIdentityArn", { value: sesIdentity.emailIdentityArn });
     new cdk.CfnOutput(this, "TicketReplyMxValue", {
       value: `10 inbound-smtp.${this.region}.amazonaws.com`,

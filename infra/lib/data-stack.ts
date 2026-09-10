@@ -44,6 +44,8 @@ export class DataStack extends cdk.Stack {
   readonly shopifyProxySecret: secretsmanager.Secret;
   readonly shopifyStorefrontSecret: secretsmanager.Secret;
   readonly pineconeSecret: secretsmanager.Secret;
+  readonly brevoApiKeySecret: secretsmanager.Secret;
+  readonly brevoWebhookSecret: secretsmanager.Secret;
 
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
@@ -205,10 +207,17 @@ export class DataStack extends cdk.Stack {
       "Shopify Storefront API access token. Outbound product hydration. Read-only scope.",
     );
     this.pineconeSecret = secret("pinecone-api-key", "Pinecone Serverless API key.");
+    this.brevoApiKeySecret = secret("brevo-api-key", "Brevo transactional email API key.");
+    this.brevoWebhookSecret = secret(
+      "brevo-webhook-secret",
+      "Bearer token required on Brevo delivery and inbound webhook calls.",
+    );
 
     // ---- Outputs ----------------------------------------------------------
     new cdk.CfnOutput(this, "TableName", { value: this.table.tableName });
     new cdk.CfnOutput(this, "DocumentsBucketName", { value: this.documentsBucket.bucketName });
     new cdk.CfnOutput(this, "TicketEmailBucketName", { value: this.ticketEmailBucket.bucketName });
+    new cdk.CfnOutput(this, "BrevoApiKeySecretName", { value: this.brevoApiKeySecret.secretName });
+    new cdk.CfnOutput(this, "BrevoWebhookSecretName", { value: this.brevoWebhookSecret.secretName });
   }
 }

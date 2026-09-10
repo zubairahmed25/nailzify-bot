@@ -86,11 +86,14 @@ const config = {
     app.node.tryGetContext("merchantSupportRecipients") ?? "support@nailzify.com",
   sesFromAddress: app.node.tryGetContext("sesFromAddress") ?? "support@nailzify.com",
   sesIdentityDomain: app.node.tryGetContext("sesIdentityDomain") ?? "nailzify.com",
+  ticketEmailProvider: app.node.tryGetContext("ticketEmailProvider") ?? "brevo",
+  brevoFromAddress: app.node.tryGetContext("brevoFromAddress") ?? "support@nailzify.com",
+  brevoInboundSpamScoreMax: app.node.tryGetContext("brevoInboundSpamScoreMax") ?? "5",
   adminAppUrl:
     app.node.tryGetContext("adminAppUrl") ??
     `https://${app.node.tryGetContext("distributionDomain") ?? "d183repo6i6gjz.cloudfront.net"}/admin/index.html`,
   supportReplyDomain:
-    app.node.tryGetContext("supportReplyDomain") ?? "support.nailzify.com",
+    app.node.tryGetContext("supportReplyDomain") ?? "tickets.nailzify.com",
 };
 
 const data = new DataStack(app, `Nailzify-${envName}-Data`, {
@@ -106,6 +109,8 @@ const api = new ApiStack(app, `Nailzify-${envName}-Api`, {
   proxySecret: data.shopifyProxySecret,
   storefrontSecret: data.shopifyStorefrontSecret,
   pineconeSecret: data.pineconeSecret,
+  brevoApiKeySecret: data.brevoApiKeySecret,
+  brevoWebhookSecret: data.brevoWebhookSecret,
   documentsBucket: data.documentsBucket,
   ticketEmailBucket: data.ticketEmailBucket,
   ...config,

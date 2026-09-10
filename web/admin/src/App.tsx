@@ -198,7 +198,7 @@ export function App() {
     <div class="admin-shell">
       <a class="skip-link" href="#main-content">Skip to main content</a>
       <header class="admin-header">
-        <div class="brand-lockup"><span class="brand-mark"><Icon name="sparkles" /></span><div><span class="admin-brand">NAILZIFY</span><strong>Support Studio</strong><small>Knowledge and customer care</small></div></div>
+        <div class="brand-lockup"><span class="brand-mark"><Icon name="sparkles" /></span><div><strong>Support Studio</strong><small>Knowledge and customer care</small></div></div>
         <nav aria-label="App sections">
           <button class={section === "knowledge" ? "is-active" : ""} aria-current={section === "knowledge" ? "page" : undefined} onClick={() => navigate("knowledge")}><Icon name="book" /><span>Knowledge Base</span></button>
           <button class={section === "tickets" ? "is-active" : ""} aria-current={section === "tickets" ? "page" : undefined} onClick={() => navigate("tickets")}><Icon name="inbox" /><span>Tickets</span></button>

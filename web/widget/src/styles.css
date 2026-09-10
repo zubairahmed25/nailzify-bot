@@ -213,14 +213,9 @@
 }
 .nz-header__text {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  align-items: center;
+  min-height: 28px;
   min-width: 0;
-}
-.nz-header__eyebrow {
-  font: 500 10px/1 "Jost", sans-serif;
-  letter-spacing: 0.3em;
-  color: var(--nz-header-label);
 }
 .nz-header__title {
   font: 500 24px/1 "Cormorant Garamond", serif;

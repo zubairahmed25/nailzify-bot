@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Reliable ticket email outbox dispatcher and Amazon SES worker.",
+  "description": "Reliable ticket email outbox, Brevo integration, and migration adapters.",
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.717.0",
     "@aws-sdk/client-sesv2": "^3.717.0",

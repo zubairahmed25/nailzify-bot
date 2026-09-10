@@ -248,7 +248,7 @@ export function describeOutcome(outcome: RetrievalOutcome): string {
       return `${outcome.chunks.length} relevant source(s) found.`;
     case "insufficient":
       return (
-        "No sufficiently relevant source was found in the Nailzify documentation. " +
+        "No sufficiently relevant source was found in the store documentation. " +
         "Tell the customer you don't have that information and offer to connect " +
         "them with the team. Do not answer from general knowledge, and do not fall " +
         "back on something you or the customer said earlier in this conversation — " +

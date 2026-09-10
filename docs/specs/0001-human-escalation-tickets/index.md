@@ -5,7 +5,7 @@
 
 ## Summary
 
-Turn the existing `escalate_to_human` signal into a durable support ticket that the merchant can manage in the existing Shopify admin app. Use DynamoDB for ticket state, Amazon SES for ticket email, and reliable background processing for notifications. The first release copies the useful parts of Zendesk without trying to copy the whole product.
+Turn the existing `escalate_to_human` signal into a durable support ticket that the merchant can manage in the existing Shopify admin app. Use DynamoDB for ticket state, Brevo for ticket email, and reliable background processing for notifications. The first release copies the useful parts of Zendesk without trying to copy the whole product.
 
 ## Requirements
 
@@ -24,16 +24,16 @@ Turn the existing `escalate_to_human` signal into a durable support ticket that 
 4. **AC-4**: Without leaving the embedded Shopify admin app, the merchant can assign a ticket, set priority, add a public email reply or private note, and move it through `new`, `open`, `pending`, `hold`, `solved`, and `closed` under the transition rules in this spec.
 5. **AC-5**: A public merchant reply is stored before email delivery is attempted. The ticket timeline shows queued, sent, delivered, delayed, bounced, complained, and failed delivery states. Email delivery retries without creating duplicate comments or duplicate logical notifications.
 6. **AC-6**: A valid customer email reply becomes one public comment on the matching ticket. A reply to a solved ticket reopens it. A reply to a closed ticket creates a linked follow up ticket.
-7. **AC-7**: Invalid reply tokens, mismatched senders, failed spam or virus checks, and duplicate inbound message ids do not add public comments. They are rejected or quarantined with a reason in logs.
+7. **AC-7**: Invalid reply tokens, mismatched senders, failed spam checks, messages with attachments, and duplicate inbound message ids do not add public comments. They are rejected with a reason in logs.
 8. **AC-8**: Only a merchant user with a valid Shopify admin session token can list tickets, view transcripts, assign work, write replies or notes, and change status.
 9. **AC-9**: Failed notification processing reaches a dead letter queue and raises an operational alarm. Ticket creation remains successful and visible even if email is temporarily unavailable.
 10. **AC-10**: Ticket counts, first response time, resolution time, reopen rate, and notification failures are observable without logging message bodies or email addresses.
 
 ## Decision
 
-**Chosen option**: Extend the current AWS application with a small ticket service and Amazon SES.
+**Chosen option**: Keep the current ticket service and replace Amazon SES with Brevo.
 
-Keep the existing TypeScript, Lambda, DynamoDB, CDK, Shopify admin authentication, and CloudWatch stack. Add ticket records to the current application table, an admin ticket queue, Amazon SES sending and receiving, an SQS notification queue with a dead letter queue, and small Lambda handlers for outbound and inbound email.
+Keep the existing TypeScript, Lambda, DynamoDB, CDK, Shopify admin authentication, CloudWatch, SQS, and ticket data model. Send transactional email through the Brevo REST API. Receive delivery events and customer replies through Brevo webhooks. Store provider credentials and webhook credentials in AWS Secrets Manager.
 
 ## Feature design
 
@@ -82,7 +82,7 @@ An EventBridge scheduled Lambda moves `solved` tickets to `closed` after seven d
 4. The customer submits the form. The API creates one ticket with an idempotency key based on the session and escalation event.
 5. The widget shows the ticket number and expected response window. The customer and merchant receive email.
 6. Merchant replies appear in the ticket timeline and are emailed to the customer.
-7. Customer email replies are received by SES and added to the same timeline.
+7. Customer email replies are received by Brevo and added to the same timeline.
 
 ### Merchant flow
 
@@ -99,17 +99,17 @@ An EventBridge scheduled Lambda moves `solved` tickets to `closed` after seven d
 
 ### Email flow
 
-Use Amazon SES in `us-east-1`, which matches the current application region and supports the required Lambda, S3, SNS, and receipt rule resources in one region.
+Use the Brevo transactional email API for outbound ticket messages. Keep the notification queue, retry policy, ticket storage, and application region unchanged.
 
-Outbound messages use `support@nailzify.com` or a dedicated support subdomain. Customer replies use a random, signed address such as `reply+<opaque-token>@support.nailzify.com`. The token maps to one ticket and is stored only as a hash. The subject also contains the human ticket number, but subject parsing is never the authority for routing.
+Outbound messages use `support@nailzify.com`. Customer replies use a random, signed address such as `reply+<opaque-token>@tickets.nailzify.com`. Brevo requires the receiving subdomain to differ from the sending domain. `reply.nailzify.com` is already reserved for Brevo's sending return path, so inbound parsing uses the separate `tickets.nailzify.com` subdomain. The token maps to one ticket and is stored only as a hash. The subject also contains the human ticket number, but subject parsing is never the authority for routing.
 
-SES inbound receipt rules write the raw MIME email to a private S3 bucket, then invoke the inbound processor. The processor requires spam and virus checks to pass, validates the opaque reply token, matches the sender to the requester or approved collaborator, deduplicates by SES message id, extracts only the new reply above the delimiter, creates a public comment, and removes the raw email after a short retention period.
+Brevo inbound parsing converts a received message into structured JSON and posts it to the webhook Lambda. The processor rejects messages with attachments, enforces the configured spam score threshold, validates the opaque reply token, matches the sender to the requester, deduplicates by the inbound message id, and stores only the extracted reply as a public comment.
 
-SES configuration sets publish delivery, bounce, complaint, delay, and reject events. The event processor updates the related outbound comment so the current state is visible in Shopify admin. Hard bounces suppress further email to that address, mark the ticket with a contact problem, and show the merchant that another contact path is required.
+Brevo transactional webhooks publish sent, delivered, deferred, soft bounce, hard bounce, blocked, invalid address, spam complaint, and unsubscribe events. Each outbound request includes an opaque job reference in `X-Mailin-custom`. The event processor resolves that reference to the stored outbox item and updates the related outbound comment. Brevo's transactional blocklist suppresses future delivery after permanent failures, while the ticket shows the merchant that another contact path is required.
 
 ### Reliable notification processing
 
-Do not send email inside the customer request transaction. The transaction writes the ticket change and an outbox record together. A DynamoDB Stream handler sends the outbox event to SQS. A notification Lambda sends through SES and records the SES message id. SQS retries temporary failures and moves exhausted jobs to a dead letter queue.
+Do not send email inside the customer request transaction. The transaction writes the ticket change and an outbox record together. A DynamoDB Stream handler sends the outbox event to SQS. A notification Lambda sends through Brevo and records the Brevo message id. SQS retries temporary failures and moves exhausted jobs to a dead letter queue.
 
 Every notification has a deterministic idempotency key using ticket id, event id, template, and recipient. The email worker may run more than once, but only one logical notification is recorded.
 
@@ -123,8 +123,8 @@ Every notification has a deterministic idempotency key using ticket id, event id
 | `/admin/api/tickets/{id}` | PATCH | expected version, status, priority, assignee | updated ticket | Shopify admin session token | `401`, `404`, `409`, `422` |
 | `/admin/api/tickets/{id}/comments` | POST | expected version, body, public or private, next status | comment id, ticket status | Shopify admin session token | `401`, `404`, `409`, `422` |
 | `/admin/api/tickets/{id}/notifications/{jobId}/retry` | POST | expected ticket version, notification job id | queued delivery state | Shopify admin session token | `401`, `404`, `409`, `422` |
-| SES receipt rule | Event | raw email location, SES verdicts, recipient token, message id | stored comment or quarantine result | AWS service permission | invalid token, duplicate, sender mismatch, malware |
-| SES delivery event | Event | SES message id, delivery event type, timestamp, diagnostic data | updated outbound comment and ticket event | AWS service permission | unknown message id, duplicate event |
+| `/webhooks/brevo/inbound` | POST | parsed sender, recipients, extracted reply, spam score, attachments, message id | stored comment or rejection | secret webhook header | invalid token, duplicate, sender mismatch, spam, attachment |
+| `/webhooks/brevo/delivery` | POST | Brevo message id, delivery event type, timestamp, diagnostic data, job reference | updated outbound comment and ticket event | secret webhook header | unknown job, duplicate event |
 
 ### Value sourcing
 
@@ -139,8 +139,8 @@ Every notification has a deterministic idempotency key using ticket id, event id
 | Send email | Recipient and template | Ticket metadata and outbox event |
 | Receive reply | Ticket identity | Opaque recipient token, never subject text |
 | Receive reply | Customer identity | Normalized sender compared with ticket requester |
-| Show outbound delivery state | Delivery state and timestamp | SES delivery event matched through stored SES message id |
-| Retry failed email | Retry eligibility | Notification job state and last SES failure category |
+| Show outbound delivery state | Delivery state and timestamp | Brevo delivery webhook matched through the signed job reference |
+| Retry failed email | Retry eligibility | Notification job state and last Brevo failure category |
 | Close stale solved ticket | Age | `solvedAt` plus the configured seven day period |
 
 ### Key invariants
@@ -155,21 +155,23 @@ Every notification has a deterministic idempotency key using ticket id, event id
 
 ### Security model
 
-Customer email and message content are personal data. Encrypt storage, use TLS, minimize retention, and support deletion through the existing customer deletion path. Use a dedicated inbound S3 bucket with public access blocked, a short lifecycle, and least privilege access for only the inbound processor.
+Customer email and message content are personal data. Encrypt storage, use TLS, minimize retention, and support deletion through the existing customer deletion path. Do not store raw inbound email. Store only the extracted reply after it passes the inbound security checks.
 
 Merchant actions require the existing Shopify admin session token and use its `sub` claim as the actor. Customer ticket creation requires the existing Shopify App Proxy signature. Reply tokens use at least 128 bits of randomness and are stored as hashes. Rate limit ticket creation per session and source address.
 
-Do not rely on sender address alone for routing. Require a valid opaque ticket token, expected sender, and successful SES scanning results. Escape all email and comment HTML before display.
+Do not rely on sender address alone for routing. Require a valid opaque ticket token, expected sender, an acceptable Brevo spam score, no attachments, and a valid webhook credential. Escape all email and comment HTML before display.
 
 ### Configuration required
 
-1. `SES_FROM_ADDRESS`, the verified sender identity.
-2. `SES_CONFIGURATION_SET`, the delivery event configuration.
-3. `SUPPORT_REPLY_DOMAIN`, the SES inbound support subdomain.
-4. `TICKET_NOTIFICATION_QUEUE_URL`, the SQS queue.
-5. `TICKET_EMAIL_BUCKET`, the private inbound email bucket.
-6. `MERCHANT_SUPPORT_RECIPIENTS`, the initial merchant alert addresses.
-7. `TICKET_CLOSE_AFTER_DAYS`, default seven.
+1. `BREVO_FROM_ADDRESS`, the verified sender identity.
+2. `BREVO_API_KEY_SECRET_ARN`, the Secrets Manager entry containing the Brevo API key.
+3. `BREVO_WEBHOOK_SECRET_ARN`, the Secrets Manager entry containing the shared webhook credential.
+4. `SUPPORT_REPLY_DOMAIN`, the Brevo inbound receiving subdomain.
+5. `BREVO_INBOUND_SPAM_SCORE_MAX`, the maximum accepted spam score.
+6. `TICKET_EMAIL_PROVIDER`, either `ses` or `brevo` during migration, then `brevo` after SES cleanup.
+7. `TICKET_NOTIFICATION_QUEUE_URL`, the SQS queue.
+8. `MERCHANT_SUPPORT_RECIPIENTS`, the initial merchant alert addresses.
+9. `TICKET_CLOSE_AFTER_DAYS`, default seven.
 
 ### Observability
 
@@ -181,11 +183,11 @@ Alarm on any dead letter message, sustained notification failure, elevated bounc
 
 1. The bot escalates, the customer confirms, one ticket appears in admin, and both notifications are queued, verifies **AC-1**, **AC-2**, and **AC-3**.
 2. A retried create request returns the original ticket and creates no duplicate, verifies **AC-1**.
-3. A merchant public reply stores before SES is invoked and a worker retry does not duplicate it, verifies **AC-5**.
+3. A merchant public reply stores before Brevo is invoked and a worker retry does not duplicate it, verifies **AC-5**.
 4. A valid customer reply reopens a solved ticket, while a reply to a closed ticket creates a linked follow up, verifies **AC-6**.
-5. A spoofed sender, invalid token, malware verdict, and duplicate message id produce no public comment, verifies **AC-7**.
+5. A spoofed sender, invalid token, excessive spam score, attachment, and duplicate message id produce no public comment, verifies **AC-7**.
 6. A storefront user cannot call merchant ticket APIs, verifies **AC-8**.
-7. SES failure leaves the ticket visible and moves the exhausted job to the dead letter queue, verifies **AC-9**.
+7. Brevo failure leaves the ticket visible and moves the exhausted job to the dead letter queue, verifies **AC-9**.
 
 ## Build plan
 
@@ -193,9 +195,9 @@ Use a tracer bullet approach. First ship the thinnest complete path from model h
 
 1. Add ticket domain types, state rules, repository port, DynamoDB adapter, `GSI3`, and idempotent creation transaction, satisfies **AC-1**, **AC-2**, and **AC-4**.
 2. Add widget escalation confirmation and ticket creation endpoint, then add the smallest admin queue and detail page, satisfies **AC-1**, **AC-2**, **AC-3**, and **AC-8**.
-3. Add SES domain verification, production access, DKIM and DMARC, SQS, dead letter queue, outbox processing, customer acknowledgement, merchant alert, and delivery event handling, satisfies **AC-3**, **AC-5**, **AC-9**, and **AC-10**.
+3. Replace the SES send adapter with the Brevo transactional API, add API key secret access, preserve SQS and dead letter handling, and record Brevo message ids, satisfies **AC-3**, **AC-5**, and **AC-9**.
 4. Add assignment, priority, public replies, private notes, optimistic concurrency, event history, and delivery status presentation inside the embedded Shopify admin ticket detail view, satisfies **AC-4**, **AC-5**, **AC-8**, and **AC-10**.
-5. Add SES inbound receipt rules, S3 raw email storage, secure reply tokens, MIME parsing, sender checks, deduplication, and solved ticket reopening, satisfies **AC-6** and **AC-7**.
+5. Add authenticated Brevo delivery and inbound webhook routes, secure reply tokens, spam and attachment checks, sender checks, deduplication, delivery state mapping, and solved ticket reopening, satisfies **AC-5**, **AC-6**, **AC-7**, and **AC-10**.
 6. Add scheduled close behavior, linked follow up tickets, stale ticket reminders, metrics, alarms, and operating runbooks, satisfies **AC-4**, **AC-6**, **AC-9**, and **AC-10**.
 
 ## Consequences
@@ -204,12 +206,12 @@ Use a tracer bullet approach. First ship the thinnest complete path from model h
 
 1. The existing handoff signal becomes a real, recoverable customer support workflow.
 2. The merchant works from the existing Shopify admin app.
-3. SES keeps email cost almost zero at current volume.
+3. Brevo can handle the current 100 to 300 monthly messages on its free daily allowance.
 4. Ticket history and notification delivery are auditable.
 
 **Negative and tradeoffs**:
 
-1. Inbound email parsing has security and deliverability edge cases that require operational care.
+1. Brevo becomes an external dependency for sending, receiving, and delivery events.
 2. The team owns ticket workflow behavior instead of buying it from Zendesk.
 3. DynamoDB access patterns must be chosen before adding indexes.
 4. A complete Zendesk rules engine is deliberately excluded.
@@ -224,7 +226,7 @@ Use a tracer bullet approach. First ship the thinnest complete path from model h
 1. Confirm the customer response promise shown in the widget, such as within one business day.
 2. Confirm the solved to closed delay. This spec assumes seven days.
 3. Confirm the merchant notification addresses and whether assignment is pull based or automatic.
-4. Confirm the support subdomain and ownership of its DNS records.
+4. Confirm Brevo inbound parsing is enabled on the selected account, then publish MX records for `tickets.nailzify.com`.
 5. Decide whether customer and merchant attachments belong in a later release.
 
 ## Rationale
@@ -233,16 +235,16 @@ Reasoning, Zendesk research, provider comparison, and cost analysis are in [rati
 
 ## Migration plan
 
-**Strategy**: Feature flagged strangler addition.
+**Strategy**: Feature flagged strangler replacement.
 
 **Phases**:
 
-1. Add ticket persistence and admin read views while the existing bot handoff behavior remains unchanged.
-2. Enable the customer confirmation form for internal testing only.
-3. Enable outbound email and monitor bounces and the dead letter queue.
-4. Enable inbound email replies after DNS, spam, virus, and duplicate handling pass verification.
-5. Enable the feature for all storefront traffic.
+1. Deploy the Brevo send adapter and webhook handlers while SES remains active.
+2. Verify the Brevo sender domain, create delivery webhooks, and send internal test notifications through Brevo.
+3. Delegate `tickets.nailzify.com` to Brevo, create the inbound webhook, and verify reply routing, spam rejection, attachment rejection, and deduplication.
+4. Switch ticket email to Brevo and monitor failures, bounces, complaints, and the dead letter queue.
+5. Remove SES identities, configuration sets, receipt rules, S3 raw email storage, and IAM permissions after the observation window.
 
-**Rollback**: Disable ticket creation and inbound receipt processing with feature flags. Existing tickets remain readable. Outbound workers can drain or pause without losing ticket data.
+**Rollback**: Switch the email provider flag back to SES during the observation window. Existing tickets remain readable and queued notifications remain in SQS.
 
-**Risks**: Incorrect DNS can break inbound mail. A bad reply parser can attach quoted history or unwanted content. Missing idempotency can duplicate tickets or email. The staged rollout isolates each risk.
+**Risks**: Incorrect DNS can break inbound mail. Brevo inbound parsing may not be available on the selected plan. A forged webhook could change delivery state or add a comment if the shared credential is exposed. The staged rollout isolates each risk.

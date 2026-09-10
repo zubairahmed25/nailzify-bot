@@ -36,13 +36,13 @@ export function quickActionPlan(
 
     case "current_promos":
       return {
-        modelText: "What current Nailzify promotions or offers are available?",
+        modelText: "What current promotions or offers are available?",
         toolCall: {
           id: toolCallId,
           name: TOOL_NAMES.searchKnowledge,
           input: {
             query:
-              "current Nailzify promotions, bundles, offers, discounts, and free shipping deals",
+              "current promotions, bundles, offers, discounts, and free shipping deals",
           },
         },
       };
@@ -50,13 +50,13 @@ export function quickActionPlan(
     case "wear_care":
       return {
         modelText:
-          "How should I apply, wear, care for, reuse, and safely remove Nailzify press-on nails?",
+          "How should I apply, wear, care for, reuse, and safely remove these press-on nails?",
         toolCall: {
           id: toolCallId,
           name: TOOL_NAMES.searchKnowledge,
           input: {
             query:
-              "how to apply, wear, care for, reuse, and safely remove Nailzify press-on nails",
+              "how to apply, wear, care for, reuse, and safely remove press-on nails",
           },
         },
       };
@@ -70,12 +70,12 @@ export function quickActionPlan(
 
     case "best_sellers":
       return {
-        modelText: "Show me Nailzify's best-selling or most popular press-on nail sets.",
+        modelText: "Show me the best-selling or most popular press-on nail sets.",
         toolCall: {
           id: toolCallId,
           name: TOOL_NAMES.searchProducts,
           input: {
-            query: "Nailzify best-selling and most popular press-on nail sets",
+            query: "best-selling and most popular press-on nail sets",
           },
         },
       };

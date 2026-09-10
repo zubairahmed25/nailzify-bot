@@ -2,6 +2,8 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { createSecretsManagerProvider } from "@nailzify/adapters";
+import { sendBrevoEmail } from "./brevo-client.js";
+import { makeEmailReference } from "./email-reference.js";
 import { makeReplyToken } from "./reply-token.js";
 
 interface QueueRecord { readonly body: string }
@@ -23,6 +25,7 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 });
 const ses = new SESv2Client({});
 let cachedReplySecret: string | undefined;
+let cachedBrevoApiKey: string | undefined;
 
 export async function handler(event: QueueEvent): Promise<void> {
   for (const record of event.Records) await deliver(JSON.parse(record.body) as Job);
@@ -67,43 +70,18 @@ async function deliver(job: Job): Promise<void> {
   }
   const email = render(job, ticket, publicReply);
   try {
+    const secret = await replySecret();
     const replyTo = job.recipientType === "customer"
-      ? `reply+${makeReplyToken(job.ticketId, await replySecret())}@${required("SUPPORT_REPLY_DOMAIN")}`
+      ? `reply+${makeReplyToken(job.ticketId, secret)}@${required("SUPPORT_REPLY_DOMAIN")}`
       : undefined;
-    const sent = await ses.send(new SendEmailCommand({
-      FromEmailAddress: required("SES_FROM_ADDRESS"),
-      Destination: { ToAddresses: [job.recipient] },
-      ...(replyTo ? { ReplyToAddresses: [replyTo] } : {}),
-      Content: {
-        Simple: {
-          Subject: { Data: email.subject, Charset: "UTF-8" },
-          Body: {
-            Text: { Data: email.text, Charset: "UTF-8" },
-            Html: { Data: email.html, Charset: "UTF-8" },
-          },
-        },
-      },
-      ...(process.env["SES_CONFIGURATION_SET"]
-        ? { ConfigurationSetName: process.env["SES_CONFIGURATION_SET"] }
-        : {}),
-      EmailTags: [
-        { Name: "ticket_id", Value: safeTag(job.ticketId) },
-        { Name: "notification", Value: safeTag(job.jobId) },
-        { Name: "event_id", Value: safeTag(job.eventId) },
-        { Name: "recipient_type", Value: job.recipientType },
-        ...(job.commentId ? [{ Name: "comment_id", Value: safeTag(job.commentId) }] : []),
-        ...(job.commentCreatedAt !== undefined
-          ? [{ Name: "comment_created_at", Value: String(job.commentCreatedAt) }]
-          : []),
-      ],
-    }));
+    const messageId = await sendEmail(job, email, replyTo, secret);
 
     await doc.send(new UpdateCommand({
       TableName: table,
       Key: outboxKey,
       UpdateExpression: "SET #status = :sent, sentAt = :now, outboundMessageId = :messageId REMOVE failureReason",
       ExpressionAttributeNames: { "#status": "status" },
-      ExpressionAttributeValues: { ":sent": "sent", ":now": Date.now(), ":messageId": sent.MessageId ?? "unknown" },
+      ExpressionAttributeValues: { ":sent": "sent", ":now": Date.now(), ":messageId": messageId },
     }));
     if (job.commentId && job.commentCreatedAt !== undefined) {
       await doc.send(new UpdateCommand({
@@ -113,7 +91,7 @@ async function deliver(job: Job): Promise<void> {
           SK: `COMMENT#${String(job.commentCreatedAt).padStart(15, "0")}#${job.commentId}`,
         },
         UpdateExpression: "SET deliveryStatus = :sent, deliveryUpdatedAt = :now, outboundMessageId = :messageId",
-        ExpressionAttributeValues: { ":sent": "sent", ":now": Date.now(), ":messageId": sent.MessageId ?? "unknown" },
+        ExpressionAttributeValues: { ":sent": "sent", ":now": Date.now(), ":messageId": messageId },
       }));
     }
     console.log(JSON.stringify({ event: "ticket.email.sent", ticketId: job.ticketId, jobId: job.jobId }));
@@ -149,8 +127,67 @@ async function deliver(job: Job): Promise<void> {
   }
 }
 
+async function sendEmail(
+  job: Job,
+  email: ReturnType<typeof render>,
+  replyTo: string | undefined,
+  referenceSecret: string,
+): Promise<string> {
+  const provider = required("TICKET_EMAIL_PROVIDER");
+  if (provider === "brevo") {
+    const reference = makeEmailReference({
+      ticketId: job.ticketId,
+      eventId: job.eventId,
+      recipientType: job.recipientType,
+      ...(job.commentId ? { commentId: job.commentId } : {}),
+      ...(job.commentCreatedAt !== undefined ? { commentCreatedAt: job.commentCreatedAt } : {}),
+    }, referenceSecret);
+    const result = await sendBrevoEmail({
+      from: required("BREVO_FROM_ADDRESS"),
+      to: job.recipient,
+      ...(replyTo ? { replyTo } : {}),
+      subject: email.subject,
+      text: email.text,
+      html: email.html,
+      idempotencyKey: job.jobId,
+      reference,
+    }, await brevoApiKey());
+    return result.messageId;
+  }
+  if (provider !== "ses") throw new Error(`Unsupported ticket email provider ${provider}`);
+
+  const sent = await ses.send(new SendEmailCommand({
+    FromEmailAddress: required("SES_FROM_ADDRESS"),
+    Destination: { ToAddresses: [job.recipient] },
+    ...(replyTo ? { ReplyToAddresses: [replyTo] } : {}),
+    Content: {
+      Simple: {
+        Subject: { Data: email.subject, Charset: "UTF-8" },
+        Body: {
+          Text: { Data: email.text, Charset: "UTF-8" },
+          Html: { Data: email.html, Charset: "UTF-8" },
+        },
+      },
+    },
+    ...(process.env["SES_CONFIGURATION_SET"]
+      ? { ConfigurationSetName: process.env["SES_CONFIGURATION_SET"] }
+      : {}),
+    EmailTags: [
+      { Name: "ticket_id", Value: safeTag(job.ticketId) },
+      { Name: "notification", Value: safeTag(job.jobId) },
+      { Name: "event_id", Value: safeTag(job.eventId) },
+      { Name: "recipient_type", Value: job.recipientType },
+      ...(job.commentId ? [{ Name: "comment_id", Value: safeTag(job.commentId) }] : []),
+      ...(job.commentCreatedAt !== undefined
+        ? [{ Name: "comment_created_at", Value: String(job.commentCreatedAt) }]
+        : []),
+    ],
+  }));
+  return sent.MessageId ?? "unknown";
+}
+
 function render(job: Job, ticket: Record<string, unknown>, publicReply: string) {
-  const subject = string(ticket["subject"]) || "Your Nailzify support request";
+  const subject = string(ticket["subject"]) || "Your support request";
   const name = string(ticket["requesterName"]) || "there";
   const adminUrl = `${required("ADMIN_APP_URL")}#tickets/${encodeURIComponent(job.ticketId)}`;
   if (job.template === "ticket-created-customer") {
@@ -166,7 +203,7 @@ function render(job: Job, ticket: Record<string, unknown>, publicReply: string) 
     const text = `Customer replied to ${job.ticketId}\n\n${subject}\n\n${publicReply}\n\nOpen it in Shopify admin: ${adminUrl}`;
     return { subject: `[${job.ticketId}] Customer replied`, text, html: paragraphs(text, adminUrl) };
   }
-  const text = `Hi ${name},\n\n${publicReply || "The Nailzify team replied to your support request."}\n\nTicket: ${job.ticketId}\n\n--- Reply above this line ---`;
+  const text = `Hi ${name},\n\n${publicReply || "The support team replied to your request."}\n\nTicket: ${job.ticketId}\n\n--- Reply above this line ---`;
   return { subject: `Re: [${job.ticketId}] ${subject}`, text, html: paragraphs(text) };
 }
 
@@ -190,4 +227,12 @@ async function replySecret(): Promise<string> {
     region: process.env["AWS_REGION"] ?? "us-east-1",
   }).get(required("PROXY_SECRET_ARN"));
   return cachedReplySecret;
+}
+
+async function brevoApiKey(): Promise<string> {
+  if (cachedBrevoApiKey) return cachedBrevoApiKey;
+  cachedBrevoApiKey = await createSecretsManagerProvider({
+    region: process.env["AWS_REGION"] ?? "us-east-1",
+  }).get(required("BREVO_API_KEY_SECRET_ARN"));
+  return cachedBrevoApiKey;
 }

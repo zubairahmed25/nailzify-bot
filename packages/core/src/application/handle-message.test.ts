@@ -194,7 +194,7 @@ describe("stable quick action intents", () => {
         name: "search_knowledge_base",
         input: {
           query:
-            "how to apply, wear, care for, reuse, and safely remove Nailzify press-on nails",
+            "how to apply, wear, care for, reuse, and safely remove press-on nails",
         },
       }),
     ]);
