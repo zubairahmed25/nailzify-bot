@@ -88,7 +88,7 @@ jobs:
       # CodeDeploy shifts 10% of traffic for 5 minutes and auto-rolls-back if the
       # error-rate or p99-latency alarm fires. docs/09-deployment.md §9.6.
       - name: Deploy (canary 10% / 5 min)
-        run: npx cdk deploy --all --require-approval never
+        run: npx cdk deploy --all --require-approval never -c customerOrderLookupEnabled=true
         working-directory: infra
         env:
           NAILZIFY_ENV: prod
