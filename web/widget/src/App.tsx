@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { loadFont } from "./index.js";
 import { AgentAvatar } from "./components/AgentAvatar.js";
 import { Composer, type ComposerFocusRequest } from "./components/Composer.js";
 import { Message } from "./components/Message.js";
+import { OrderLookup } from "./components/OrderLookup.js";
 import { TicketConfirmation } from "./components/TicketConfirmation.js";
 import { QuickActions, QuickActionsBar } from "./components/QuickActions.js";
 import {
   OTHER_PROMPT,
   type QuickActionDefinition,
 } from "./quick-actions.js";
+import { splitAtOrderPanel } from "./order-timeline.js";
 import { loadPersistedState, savePersistedState, useChat } from "./useChat.js";
 
 function CloseIcon() {
@@ -24,7 +26,23 @@ function CloseIcon() {
 const NEAR_BOTTOM_PX = 120;
 
 export function App() {
-  const { messages, status, toolActivity, send, addAssistantPrompt, submitTicket, stop } = useChat();
+  const {
+    messages,
+    status,
+    toolActivity,
+    customerOrders,
+    orderTimelineIndex,
+    send,
+    addAssistantPrompt,
+    submitTicket,
+    stop,
+    loadRecentOrders,
+    startOrderAuthentication,
+    selectOrder,
+    clearCustomerOrders,
+    contactSupportForOrder,
+    orderIdForEscalation,
+  } = useChat();
   // Reopens itself after a navigation. Landing on a product page with the chat
   // closed makes it look like the conversation ended, when the customer only
   // followed a recommendation the bot gave them.
@@ -49,18 +67,45 @@ export function App() {
   // indicator. Matches exactly when the old text-based status line used to
   // render something rather than sitting empty.
   const showTyping = status === "thinking" || toolActivity !== null;
+  const orderTimeline = splitAtOrderPanel(
+    messages,
+    customerOrders.status === "idle" ? null : orderTimelineIndex,
+  );
+
+  const renderMessages = (items: typeof messages) => items.map((message) => (
+    <div key={message.id} class="nz-message-block">
+      <Message message={message} />
+      {message.handoff && (
+        <TicketConfirmation
+          escalationId={message.handoff.id}
+          {...(orderIdForEscalation(message.handoff.id)
+            ? { orderId: orderIdForEscalation(message.handoff.id) }
+            : {})}
+          onSubmit={submitTicket}
+        />
+      )}
+    </div>
+  ));
 
   const sendQuickAction = async (action: QuickActionDefinition) => {
+    let outcome: "chat" | "order_lookup" = "chat";
     if (action.intent === "other") {
       addAssistantPrompt(OTHER_PROMPT);
     } else {
-      await send(action.title, action.intent);
+      outcome = await send(action.title, action.intent);
     }
+
+    if (outcome === "order_lookup") return;
 
     const emphasize = !hasShownComposerCue.current;
     hasShownComposerCue.current = true;
     setComposerFocusRequest((current) => ({ id: current.id + 1, emphasize }));
   };
+
+  const closeChat = useCallback(() => {
+    clearCustomerOrders();
+    setOpen(false);
+  }, [clearCustomerOrders]);
 
   useEffect(() => {
     savePersistedState({ open, messages });
@@ -139,7 +184,7 @@ export function App() {
     } else if (messages.length > 0) {
       setShowJump(true);
     }
-  }, [messages, toolActivity]);
+  }, [messages, toolActivity, customerOrders]);
 
   const jumpToLatest = () => {
     const el = scroller.current;
@@ -169,13 +214,13 @@ export function App() {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setOpen(false);
+        closeChat();
         launcher.current?.focus();
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, [open, clearCustomerOrders]);
 
   useEffect(() => {
     if (!open) return;
@@ -228,7 +273,10 @@ export function App() {
       <button
         ref={launcher}
         class={`nz-launcher${open ? " nz-launcher--open" : ""}`}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (open) closeChat();
+          else setOpen(true);
+        }}
         aria-expanded={open}
         aria-controls="nz-panel"
         aria-label={open ? "Close chat" : "Chat with us about nails"}
@@ -261,7 +309,7 @@ export function App() {
               <span class="nz-header__title">Your Fav Nail Bestie is live!</span>
             </div>
           </div>
-          <button class="nz-header__close" onClick={() => setOpen(false)} aria-label="Close chat">
+          <button class="nz-header__close" onClick={closeChat} aria-label="Close chat">
             ✕
           </button>
         </header>
@@ -282,17 +330,21 @@ export function App() {
               reappear once the conversation has started. */}
           {messages.length === 0 && <QuickActions onSelect={sendQuickAction} disabled={busy} />}
 
-          {messages.map((message) => (
-            <div key={message.id} class="nz-message-block">
-              <Message message={message} />
-              {message.handoff && (
-                <TicketConfirmation
-                  escalationId={message.handoff.id}
-                  onSubmit={submitTicket}
-                />
-              )}
-            </div>
-          ))}
+          {renderMessages(orderTimeline.before)}
+
+          <OrderLookup
+            state={customerOrders}
+            onSignIn={() => void startOrderAuthentication()}
+            onRetry={() => void loadRecentOrders()}
+            onSelect={(orderId) => void selectOrder(orderId)}
+            onBack={() => void loadRecentOrders()}
+            onContactSupport={(orderId) => {
+              if (orderId) void contactSupportForOrder(orderId);
+              else void send("I want to talk to a person about my order.");
+            }}
+          />
+
+          {renderMessages(orderTimeline.after)}
 
           {showTyping && (
             <div class="nz-typing" aria-hidden="true">

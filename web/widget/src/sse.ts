@@ -20,7 +20,8 @@ type ServerEvent =
       products?: readonly ProductRef[];
       handoff?: { readonly id: string; readonly reason: string; readonly summary: string } | null;
     }
-  | { type: "refused"; reason: string };
+  | { type: "refused"; reason: string }
+  | { type: "order_lookup" };
 
 /**
  * Parse an SSE byte stream into events.

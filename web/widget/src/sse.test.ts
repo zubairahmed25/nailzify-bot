@@ -94,6 +94,11 @@ describe("frame reassembly", () => {
     expect(events).toEqual([{ type: "token", text: "x" }]);
   });
 
+  it("parses the deterministic order lookup route without model text", async () => {
+    const events = await collect(streamOf([frame({ type: "order_lookup" })]));
+    expect(events).toEqual([{ type: "order_lookup" }]);
+  });
+
   it("drops a trailing partial frame rather than emitting half an event", async () => {
     const events = await collect(
       streamOf([frame({ type: "token", text: "done" }) + 'data: {"type":"tok']),

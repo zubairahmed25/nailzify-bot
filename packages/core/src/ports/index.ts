@@ -33,6 +33,13 @@ import type {
   TicketPriority,
   TicketStatus,
 } from "../domain/ticket/ticket.js";
+import type {
+  CustomerOrderAuthChallenge,
+  CustomerOrderAuditEvent,
+  CustomerOrderDetail,
+  CustomerOrdersResult,
+  CustomerOrderSession,
+} from "../domain/order/customer-order.js";
 
 // ===========================================================================
 // Clock
@@ -281,6 +288,70 @@ export interface ProductCatalog {
 export interface ProductMetadataCache {
   get(id: ProductId): Promise<CachedProductMetadata | null>;
   putMany(items: readonly CachedProductMetadata[]): Promise<void>;
+}
+
+// ===========================================================================
+// Customer order access
+// ===========================================================================
+
+export interface CustomerOrderAuthorizationInput {
+  readonly state: string;
+  readonly nonce: string;
+  readonly codeChallenge: string;
+  readonly redirectUri: string;
+}
+
+export interface CustomerOrderTokenGrant {
+  readonly accessToken: string;
+  readonly customerId: CustomerId;
+  readonly nonce: string;
+  readonly expiresInSeconds: number;
+}
+
+export type CustomerOrderApiFailure =
+  | "authentication"
+  | "rate_limited"
+  | "unavailable"
+  | "not_found"
+  | "invalid_response";
+
+export class CustomerOrderApiError extends Error {
+  constructor(
+    readonly kind: CustomerOrderApiFailure,
+    message: string,
+    readonly retryAfterMs: number | null = null,
+  ) {
+    super(message);
+  }
+}
+
+/** Buyer scoped Shopify Customer Account API boundary. */
+export interface CustomerOrderAccess {
+  createAuthorizationUrl(input: CustomerOrderAuthorizationInput): Promise<string>;
+  exchangeAuthorizationCode(input: {
+    readonly code: string;
+    readonly codeVerifier: string;
+    readonly redirectUri: string;
+  }): Promise<CustomerOrderTokenGrant>;
+  listRecentOrders(accessToken: string, limit: number): Promise<CustomerOrdersResult>;
+  getOrder(accessToken: string, orderId: string): Promise<CustomerOrderDetail | null>;
+}
+
+export interface CustomerOrderAuthRepository {
+  createChallenge(challenge: CustomerOrderAuthChallenge): Promise<void>;
+  /** Atomic read and delete. A second callback with the same state gets null. */
+  consumeChallenge(stateHash: string): Promise<CustomerOrderAuthChallenge | null>;
+  saveSession(session: CustomerOrderSession): Promise<void>;
+  loadSession(sessionId: SessionId): Promise<CustomerOrderSession | null>;
+  deleteSession(sessionId: SessionId): Promise<void>;
+  appendAudit(event: CustomerOrderAuditEvent, ttlEpochSeconds: number): Promise<void>;
+  /** Returns false when the configured count is already exhausted. */
+  consumeRateLimit(keyHash: string, windowEpochSeconds: number, limit: number): Promise<boolean>;
+}
+
+export interface SecretCipher {
+  encrypt(plaintext: string, context: Readonly<Record<string, string>>): Promise<string>;
+  decrypt(ciphertext: string, context: Readonly<Record<string, string>>): Promise<string>;
 }
 
 // ===========================================================================

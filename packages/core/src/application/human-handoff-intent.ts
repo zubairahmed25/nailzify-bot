@@ -36,6 +36,11 @@ function asksForPolicy(text: string): boolean {
 
 function handoffReason(text: string): string | null {
   if (
+    /\b(human help|human agent|real person|live agent|support team|customer support|manager)\b/.test(text) ||
+    /\b(speak|talk|connect)\b.*\b(human|person|agent|support|manager)\b/.test(text)
+  ) return "Customer requested human help";
+
+  if (
     /^(refund|refunds)$/.test(text) ||
     /\b(i want|i need|give me|request|process|issue|get)\s+(a\s+)?refund\b/.test(text) ||
     /\brefund\s+(my|this|the)\b/.test(text)

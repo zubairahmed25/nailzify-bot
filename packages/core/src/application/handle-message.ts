@@ -128,6 +128,30 @@ function dedupeById(products: readonly Product[]): readonly Product[] {
   return products.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
 }
 
+function normalizeProductText(value: string): string {
+  return value
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Search can be iterative, but the widget must not render every candidate from
+ * every attempt. The assistant names the final choices in its answer, so keep
+ * only those exact products on the typed Shopify to widget path.
+ */
+function productsNamedInAnswer(answer: string, products: readonly Product[]): readonly Product[] {
+  const normalizedAnswer = ` ${normalizeProductText(answer)} `;
+  return products.filter((product) => {
+    const fullTitle = normalizeProductText(product.title);
+    const baseTitle = normalizeProductText(product.title.replace(/\s*\([^)]*\)\s*$/, ""));
+    return [fullTitle, baseTitle]
+      .filter((title, index, values) => title.length >= 3 && values.indexOf(title) === index)
+      .some((title) => normalizedAnswer.includes(` ${title} `));
+  });
+}
+
 /** "almond" -> "Almond". Every value in NailShape/NailFinish is one lowercase word. */
 function capitalize(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1);
@@ -305,10 +329,13 @@ export function createHandleMessage(deps: HandleMessageDeps) {
       });
     }
 
+    const displayedProducts = productsNamedInAnswer(answer, dedupeById(artifacts.products));
+    const displayedProductIds = displayedProducts.map((product) => product.id);
+
     const assistantTurn = assistantMessage(nextId("a"), answer, finishedAt, {
       citations: artifacts.citations,
       retrievedChunkIds: artifacts.chunkIds,
-      shownProductIds: artifacts.productIds,
+      shownProductIds: displayedProductIds,
       usage: totals,
       promptVersion: SYSTEM_PROMPT_VERSION,
     });
@@ -318,10 +345,8 @@ export function createHandleMessage(deps: HandleMessageDeps) {
     yield {
       type: "done",
       citations: artifacts.citations,
-      productIds: artifacts.productIds,
-      // De-duplicated: a turn that searches and then fetches details on the same
-      // product would otherwise render it twice.
-      products: dedupeById(artifacts.products).map(toDisplayProduct),
+      productIds: displayedProductIds,
+      products: displayedProducts.map(toDisplayProduct),
       escalated: artifacts.escalated,
       handoff:
         artifacts.escalationId && artifacts.escalationReason && artifacts.escalationSummary !== null

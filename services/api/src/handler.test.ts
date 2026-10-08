@@ -377,6 +377,113 @@ describe("POST /tickets", () => {
   });
 });
 
+describe("customer order routes", () => {
+  const customerOrders = () => ({
+    beginAuthentication: vi.fn(async () => ({ authorizationUrl: "https://account.nailzify.com/auth" })),
+    completeAuthentication: vi.fn(async () => "https://nailzify.com/?order_auth=success"),
+    listRecent: vi.fn(async () => []),
+    getDetail: vi.fn(async () => ({
+      id: "gid://shopify/Order/91",
+      name: "#1091",
+      createdAt: "2026-10-01T12:00:00Z",
+      total: { amount: "39.00", currencyCode: "USD" },
+      financialStatus: "PAID",
+      fulfillmentStatus: "FULFILLED",
+      lineItems: [{ name: "Rose Set", quantity: 1 }],
+      tracking: [],
+    })),
+  }) as unknown as NonNullable<Container["customerOrders"]>;
+
+  it("routes a live order request around both the model and knowledge pipeline", async () => {
+    const { stream, captured } = fakeStream();
+    const container: Container = { ...fakeContainer(), customerOrders: customerOrders() };
+    await handleRequest(request({
+      body: JSON.stringify({
+        sessionId: "01JQZ8K2M4ABCDEF",
+        messageId: "01JQZ9AAAABBBBCC",
+        message: "Where is my order?",
+      }),
+    }), stream, async () => container);
+
+    expect(parseFrames(captured.body)).toEqual([{ type: "order_lookup" }]);
+    expect(container.handleMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps order endpoints behind the verified Shopify App Proxy", async () => {
+    const { stream, captured } = fakeStream();
+    const orders = customerOrders();
+    await handleRequest(request({
+      rawPath: "/apps/nailzify-chat/customer-orders/recent",
+      rawQueryString: "shop=dgjv8c-aa.myshopify.com",
+      body: JSON.stringify({ sessionId: "01JQZ8K2M4ABCDEF" }),
+    }), stream, async () => ({ ...fakeContainer(), customerOrders: orders }));
+
+    expect(captured.statusCode).toBe(401);
+    expect(orders.listRecent).not.toHaveBeenCalled();
+  });
+
+  it("returns recent orders with no store caching", async () => {
+    const { stream, captured } = fakeStream();
+    const orders = customerOrders();
+    await handleRequest(request({
+      rawPath: "/apps/nailzify-chat/customer-orders/recent",
+      body: JSON.stringify({ sessionId: "01JQZ8K2M4ABCDEF" }),
+    }), stream, async () => ({ ...fakeContainer(), customerOrders: orders }));
+
+    expect(captured.statusCode).toBe(200);
+    expect(captured.headers["cache-control"]).toBe("no-store");
+    expect(orders.listRecent).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "01JQZ8K2M4ABCDEF",
+    }));
+  });
+
+  it("accepts the OAuth callback without an App Proxy signature and redirects safely", async () => {
+    const { stream, captured } = fakeStream();
+    const orders = customerOrders();
+    await handleRequest({
+      rawPath: "/api/customer-orders/auth/callback",
+      rawQueryString: "state=safe-state&code=safe-code",
+      requestContext: { http: { method: "GET" } },
+    }, stream, async () => ({ ...fakeContainer(), customerOrders: orders }));
+
+    expect(captured.statusCode).toBe(302);
+    expect(captured.headers.location).toBe("https://nailzify.com/?order_auth=success");
+    expect(captured.headers["cache-control"]).toBe("no-store");
+    expect(captured.body).toBe("Redirecting...");
+    expect(orders.completeAuthentication).toHaveBeenCalledWith({
+      state: "safe-state",
+      code: "safe-code",
+    });
+  });
+
+  it("revalidates selected order details only after explicit ticket consent", async () => {
+    const { stream, captured } = fakeStream();
+    const orders = customerOrders();
+    const createTicket = vi.fn(async () => ({
+      ok: true,
+      created: true,
+      ticket: { id: "TKT-ORDER", status: "new", createdAt: 100 },
+    })) as unknown as Container["createTicket"];
+    await handleRequest(request({
+      rawPath: "/apps/nailzify-chat/tickets",
+      body: JSON.stringify({
+        sessionId: "01JQZ8K2M4ABCDEF",
+        escalationId: "handoff-1",
+        email: "customer@example.com",
+        includeTranscript: false,
+        includeOrderContext: true,
+        orderId: "gid://shopify/Order/91",
+      }),
+    }), stream, async () => ({ ...fakeContainer(), customerOrders: orders, createTicket }));
+
+    expect(captured.statusCode).toBe(201);
+    expect(orders.getDetail).toHaveBeenCalledTimes(1);
+    expect(createTicket).toHaveBeenCalledWith(expect.objectContaining({
+      addedDetail: expect.stringContaining("Order: #1091") as string,
+    }));
+  });
+});
+
 describe("query parsing", () => {
   it("preserves repeated parameters so the signature still verifies", async () => {
     // queryStringParameters collapses duplicates, which would corrupt the

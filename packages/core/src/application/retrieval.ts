@@ -134,7 +134,10 @@ export async function searchProducts(
 
   const candidates = await deps.vectors.searchProducts(vector, deps.candidateCount ?? 12, {
     ...(preferences.shape ? { shape: preferences.shape } : {}),
-    ...(preferences.length ? { length: preferences.length } : {}),
+    // Length is absent for almost the whole live catalog. A hard metadata filter
+    // turns ordinary requests for short nails into guaranteed zero-result
+    // searches. Keep length in semantic ranking and recommendation scoring, then
+    // tell the model when the returned products have no confirmed length.
     ...(preferences.occasion ? { occasion: preferences.occasion } : {}),
     // A coarse band pre-filter, not a price check. The exact price still comes
     // from the live hydration below.

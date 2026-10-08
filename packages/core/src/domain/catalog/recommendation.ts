@@ -188,15 +188,17 @@ function score(product: Product, prefs: CustomerPreferences): Recommendation {
     }
   }
 
-  if (prefs.length !== undefined && attrs.length !== null) {
+  if (prefs.length !== undefined) {
     possible += WEIGHT.length;
-    const distance = lengthDistance(attrs.length, prefs.length);
-    if (distance === 0) {
-      earned += WEIGHT.length;
-      reasons.push(`${attrs.length} length`);
-    } else if (distance === 1) {
-      earned += WEIGHT.length * 0.4;
-      reasons.push(`${attrs.length} length, one step from your preference`);
+    if (attrs.length !== null) {
+      const distance = lengthDistance(attrs.length, prefs.length);
+      if (distance === 0) {
+        earned += WEIGHT.length;
+        reasons.push(`${attrs.length} length`);
+      } else if (distance === 1) {
+        earned += WEIGHT.length * 0.4;
+        reasons.push(`${attrs.length} length, one step from your preference`);
+      }
     }
   }
 

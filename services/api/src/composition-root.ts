@@ -16,6 +16,9 @@ import {
   createBedrockEmbedder,
   createBedrockLlmClient,
   createBedrockReranker,
+  createCustomerAccountClient,
+  createDynamoOrderAuthRepo,
+  createKmsCipher,
   createPineconeVectorStore,
   createShopifyProductCatalog,
   createStorefrontClient,
@@ -29,11 +32,13 @@ import {
   type TicketRepository,
 } from "@nailzify/core";
 import { createTicketUseCase } from "./tickets/create-ticket.js";
+import { createCustomerOrderService } from "./customer-orders/service.js";
 
 export interface Container {
   readonly handleMessage: ReturnType<typeof createHandleMessage>;
   readonly proxySecret: string;
   readonly createTicket: ReturnType<typeof createTicketUseCase>;
+  readonly customerOrders?: ReturnType<typeof createCustomerOrderService>;
 }
 
 export interface ContainerConfig {
@@ -49,6 +54,15 @@ export interface ContainerConfig {
   readonly conversations: ConversationRepository;
   readonly tickets: TicketRepository;
   readonly merchantRecipients: readonly string[];
+  readonly customerOrders?: {
+    readonly clientId: string;
+    readonly callbackUrl: string;
+    readonly allowedReturnOrigin: string;
+    readonly kmsKeyId: string;
+    readonly tableName: string;
+    readonly maxRecent?: number;
+    readonly sessionMinutes?: number;
+  };
   readonly onWarning?: (message: string) => void;
   readonly onUsage?: (usage: { model: string; cacheReadInputTokens: number }) => void;
 }
@@ -94,6 +108,39 @@ export function buildContainer(config: ContainerConfig): Container {
     clock: systemClock,
   });
 
+  const customerOrders = config.customerOrders
+    ? createCustomerOrderService({
+      shopDomain: config.shopDomain,
+      callbackUrl: config.customerOrders.callbackUrl,
+      allowedReturnOrigin: config.customerOrders.allowedReturnOrigin,
+      ...(config.customerOrders.maxRecent !== undefined
+        ? { maxRecent: config.customerOrders.maxRecent }
+        : {}),
+      ...(config.customerOrders.sessionMinutes !== undefined
+        ? { sessionMinutes: config.customerOrders.sessionMinutes }
+        : {}),
+      access: createCustomerAccountClient({
+        storefrontDomain: config.storefrontDomain,
+        shopDomain: config.shopDomain,
+        clientId: config.customerOrders.clientId,
+        javascriptOrigin: config.customerOrders.allowedReturnOrigin,
+      }),
+      repository: createDynamoOrderAuthRepo({
+        tableName: config.customerOrders.tableName,
+        region: config.region,
+      }),
+      cipher: createKmsCipher({
+        keyId: config.customerOrders.kmsKeyId,
+        region: config.region,
+      }),
+      onAuthFailure: (event) => console.warn(JSON.stringify({
+        level: "WARN",
+        msg: "customer_order_auth.failed",
+        ...event,
+      })),
+    })
+    : undefined;
+
   return {
     handleMessage: createHandleMessage({
       llm,
@@ -108,5 +155,6 @@ export function buildContainer(config: ContainerConfig): Container {
       merchantRecipients: config.merchantRecipients,
       hashingSecret: config.proxySecret,
     }),
+    ...(customerOrders ? { customerOrders } : {}),
   };
 }

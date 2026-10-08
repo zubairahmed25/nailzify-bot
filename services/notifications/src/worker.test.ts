@@ -26,12 +26,14 @@ describe("ticket email worker", () => {
     );
     mocks.sesSend.mockReset();
     mocks.secretGet.mockReset().mockImplementation(async (arn: string) =>
-      arn.includes("brevo") ? "brevo-api-key" : "reference-secret",
+      arn.includes("brevo") ? "brevo-api-key" : arn.includes("resend") ? "resend-api-key" : "reference-secret",
     );
     process.env["TABLE_NAME"] = "tickets";
     process.env["TICKET_EMAIL_PROVIDER"] = "brevo";
     process.env["BREVO_FROM_ADDRESS"] = "support@nailzify.com";
     process.env["BREVO_API_KEY_SECRET_ARN"] = "brevo-secret-arn";
+    process.env["RESEND_FROM_ADDRESS"] = "support@nailzify.com";
+    process.env["RESEND_API_KEY_SECRET_ARN"] = "resend-secret-arn";
     process.env["SUPPORT_REPLY_DOMAIN"] = "tickets.nailzify.com";
     process.env["PROXY_SECRET_ARN"] = "reference-secret-arn";
     process.env["ADMIN_APP_URL"] = "https://example.com/admin";
@@ -64,5 +66,38 @@ describe("ticket email worker", () => {
       .map((call) => call[0] as { input: any })
       .find((command) => command.input.ExpressionAttributeValues?.[":messageId"] === "brevo-message-1");
     expect(sentUpdate?.input.Key.SK).toBe("OUTBOX#event-1#customer");
+  });
+
+  it("sends queued ticket email through Resend with correlation tags", async () => {
+    process.env["TICKET_EMAIL_PROVIDER"] = "resend";
+    const fetcher = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(
+      JSON.stringify({ id: "resend-message-1" }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetcher);
+
+    await handler({ Records: [{ body: JSON.stringify({
+      jobId: "job-2",
+      ticketId: "TKT-2",
+      eventId: "event-2",
+      recipientType: "customer",
+      template: "ticket-created-customer",
+      recipient: "customer@example.com",
+      createdAt: 100,
+    }) }] });
+
+    const request = fetcher.mock.calls[0]![1]!;
+    const body = JSON.parse(String(request.body));
+    expect(body.reply_to).toMatch(/^reply\+.+@tickets\.nailzify\.com$/);
+    expect(body.tags).toEqual(expect.arrayContaining([
+      { name: "ticket_id", value: "TKT-2" },
+      { name: "event_id", value: "event-2" },
+      { name: "recipient_type", value: "customer" },
+    ]));
+
+    const sentUpdate = mocks.dynamoSend.mock.calls
+      .map((call) => call[0] as { input: any })
+      .find((command) => command.input.ExpressionAttributeValues?.[":messageId"] === "resend-message-1");
+    expect(sentUpdate?.input.Key.SK).toBe("OUTBOX#event-2#customer");
   });
 });

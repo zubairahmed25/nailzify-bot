@@ -54,6 +54,10 @@ const config = {
   // stack's first deploy; this is that value, not a placeholder.
   distributionDomain:
     app.node.tryGetContext("distributionDomain") ?? "d183repo6i6gjz.cloudfront.net",
+  customerOrderReturnOrigin:
+    app.node.tryGetContext("customerOrderReturnOrigin") ?? "https://www.nailzify.com",
+  customerOrderLookupEnabled:
+    String(app.node.tryGetContext("customerOrderLookupEnabled") ?? "false") === "true",
 
   // ⚠️ Shopify supports each API version for ~12 months, then retires it. A
   // stale value fails like a bad credential rather than saying "version gone",
@@ -86,9 +90,10 @@ const config = {
     app.node.tryGetContext("merchantSupportRecipients") ?? "support@nailzify.com",
   sesFromAddress: app.node.tryGetContext("sesFromAddress") ?? "support@nailzify.com",
   sesIdentityDomain: app.node.tryGetContext("sesIdentityDomain") ?? "nailzify.com",
-  ticketEmailProvider: app.node.tryGetContext("ticketEmailProvider") ?? "brevo",
+  ticketEmailProvider: app.node.tryGetContext("ticketEmailProvider") ?? "resend",
   brevoFromAddress: app.node.tryGetContext("brevoFromAddress") ?? "support@nailzify.com",
   brevoInboundSpamScoreMax: app.node.tryGetContext("brevoInboundSpamScoreMax") ?? "5",
+  resendFromAddress: app.node.tryGetContext("resendFromAddress") ?? "support@nailzify.com",
   adminAppUrl:
     app.node.tryGetContext("adminAppUrl") ??
     `https://${app.node.tryGetContext("distributionDomain") ?? "d183repo6i6gjz.cloudfront.net"}/admin/index.html`,
@@ -111,8 +116,11 @@ const api = new ApiStack(app, `Nailzify-${envName}-Api`, {
   pineconeSecret: data.pineconeSecret,
   brevoApiKeySecret: data.brevoApiKeySecret,
   brevoWebhookSecret: data.brevoWebhookSecret,
+  resendApiKeySecret: data.resendApiKeySecret,
+  resendWebhookSecret: data.resendWebhookSecret,
   documentsBucket: data.documentsBucket,
   ticketEmailBucket: data.ticketEmailBucket,
+  customerOrderKey: data.customerOrderKey,
   ...config,
 });
 

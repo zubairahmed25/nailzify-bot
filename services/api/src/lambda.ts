@@ -57,6 +57,8 @@ function required(name: string): string {
 async function loadConfig(): Promise<ContainerConfig> {
   const region = process.env["AWS_REGION"] ?? "us-east-1";
   const secrets = createSecretsManagerProvider({ region });
+  const tableName = required("TABLE_NAME");
+  const customerOrderLookupEnabled = process.env["CUSTOMER_ORDER_LOOKUP_ENABLED"] === "true";
 
   // In parallel. Three sequential round trips would add ~90ms to every cold
   // start for values that have nothing to do with each other.
@@ -76,11 +78,11 @@ async function loadConfig(): Promise<ContainerConfig> {
     storefrontDomain: required("STOREFRONT_DOMAIN"),
     shopifyApiVersion: required("SHOPIFY_API_VERSION"),
     conversations: createDynamoConversationRepo({
-      tableName: required("TABLE_NAME"),
+      tableName,
       region,
     }),
     tickets: createDynamoTicketRepo({
-      tableName: required("TABLE_NAME"),
+      tableName,
       region,
     }),
     merchantRecipients: (process.env["MERCHANT_SUPPORT_RECIPIENTS"] ?? "")
@@ -96,7 +98,27 @@ async function loadConfig(): Promise<ContainerConfig> {
       console.warn(JSON.stringify({ level: "WARN", msg: "merchandising", detail: message })),
     onUsage: (usage) =>
       console.log(JSON.stringify({ level: "INFO", msg: "bedrock.usage", ...usage })),
+    ...(customerOrderLookupEnabled
+      ? {
+        customerOrders: {
+          clientId: required("SHOPIFY_API_KEY"),
+          callbackUrl: required("CUSTOMER_ORDER_AUTH_CALLBACK_URL"),
+          allowedReturnOrigin: required("CUSTOMER_ORDER_AUTH_RETURN_URL"),
+          kmsKeyId: required("CUSTOMER_ORDER_KMS_KEY_ID"),
+          tableName,
+          maxRecent: numberSetting("CUSTOMER_ORDER_MAX_RECENT", 5),
+          sessionMinutes: numberSetting("CUSTOMER_ORDER_SESSION_MINUTES", 15),
+        },
+      }
+      : {}),
   };
+}
+
+function numberSetting(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 export const handler = awslambda.streamifyResponse(

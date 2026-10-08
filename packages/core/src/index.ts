@@ -22,6 +22,9 @@ export * from "./domain/conversation/window.js";
 // ---- merchant support ----
 export * from "./domain/ticket/ticket.js";
 
+// ---- customer orders ----
+export * from "./domain/order/customer-order.js";
+
 // ---- knowledge plane ----
 export * from "./domain/knowledge/chunk.js";
 export * from "./domain/knowledge/chunking.js";
@@ -44,6 +47,7 @@ export * from "./application/quick-actions.js";
 export * from "./application/ingest-knowledge.js";
 export * from "./application/ingest-products.js";
 export * from "./application/classify-document.js";
+export * from "./application/order-intent.js";
 
 // ---- ports ----
 export * from "./ports/index.js";

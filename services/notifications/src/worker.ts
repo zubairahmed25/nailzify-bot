@@ -5,6 +5,7 @@ import { createSecretsManagerProvider } from "@nailzify/adapters";
 import { sendBrevoEmail } from "./brevo-client.js";
 import { makeEmailReference } from "./email-reference.js";
 import { makeReplyToken } from "./reply-token.js";
+import { sendResendEmail } from "./resend-client.js";
 
 interface QueueRecord { readonly body: string }
 interface QueueEvent { readonly Records: readonly QueueRecord[] }
@@ -26,6 +27,7 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 const ses = new SESv2Client({});
 let cachedReplySecret: string | undefined;
 let cachedBrevoApiKey: string | undefined;
+let cachedResendApiKey: string | undefined;
 
 export async function handler(event: QueueEvent): Promise<void> {
   for (const record of event.Records) await deliver(JSON.parse(record.body) as Job);
@@ -134,6 +136,27 @@ async function sendEmail(
   referenceSecret: string,
 ): Promise<string> {
   const provider = required("TICKET_EMAIL_PROVIDER");
+  if (provider === "resend") {
+    const result = await sendResendEmail({
+      from: required("RESEND_FROM_ADDRESS"),
+      to: job.recipient,
+      ...(replyTo ? { replyTo } : {}),
+      subject: email.subject,
+      text: email.text,
+      html: email.html,
+      idempotencyKey: job.jobId,
+      tags: [
+        { name: "ticket_id", value: safeTag(job.ticketId) },
+        { name: "event_id", value: safeTag(job.eventId) },
+        { name: "recipient_type", value: job.recipientType },
+        ...(job.commentId ? [{ name: "comment_id", value: safeTag(job.commentId) }] : []),
+        ...(job.commentCreatedAt !== undefined
+          ? [{ name: "comment_created_at", value: String(job.commentCreatedAt) }]
+          : []),
+      ],
+    }, await resendApiKey());
+    return result.messageId;
+  }
   if (provider === "brevo") {
     const reference = makeEmailReference({
       ticketId: job.ticketId,
@@ -235,4 +258,12 @@ async function brevoApiKey(): Promise<string> {
     region: process.env["AWS_REGION"] ?? "us-east-1",
   }).get(required("BREVO_API_KEY_SECRET_ARN"));
   return cachedBrevoApiKey;
+}
+
+async function resendApiKey(): Promise<string> {
+  if (cachedResendApiKey) return cachedResendApiKey;
+  cachedResendApiKey = await createSecretsManagerProvider({
+    region: process.env["AWS_REGION"] ?? "us-east-1",
+  }).get(required("RESEND_API_KEY_SECRET_ARN"));
+  return cachedResendApiKey;
 }

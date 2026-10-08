@@ -15,6 +15,8 @@
 
 import type { ChatEvent } from "@nailzify/core";
 
+export type OrderRouteEvent = { readonly type: "order_lookup" };
+
 /** Minimal sink so framing is testable without a Lambda response stream. */
 export interface ByteSink {
   write(chunk: string): void;
@@ -22,7 +24,7 @@ export interface ByteSink {
 }
 
 export interface SseWriter {
-  send(event: ChatEvent): void;
+  send(event: ChatEvent | OrderRouteEvent): void;
   /** Comment frame. Keeps intermediaries from closing an idle connection. */
   heartbeat(): void;
   fail(message: string): void;

@@ -1,0 +1,31 @@
+# Shopify app configuration. The client ID is a public app identifier, not a secret.
+client_id = "8c1a30f0e9846049c1a201038130bf9a"
+name = "Nailzify Support App"
+application_url = "https://d183repo6i6gjz.cloudfront.net/admin/index.html"
+embedded = true
+
+[app_proxy]
+url = "https://d183repo6i6gjz.cloudfront.net/api"
+subpath = "nailzify-chat"
+prefix = "apps"
+
+[webhooks]
+api_version = "2026-07"
+
+[access_scopes]
+scopes = "customer_read_customers,customer_read_orders,read_all_orders"
+optional_scopes = []
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://d183repo6i6gjz.cloudfront.net/api/customer-orders/auth/callback"
+]
+
+[customer_authentication]
+redirect_uris = [
+  "https://d183repo6i6gjz.cloudfront.net/api/customer-orders/auth/callback"
+]
+javascript_origins = [
+  "https://www.nailzify.com"
+]

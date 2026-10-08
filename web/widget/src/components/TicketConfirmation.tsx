@@ -3,17 +3,19 @@ import type { TicketConfirmationInput } from "../types.js";
 
 interface Props {
   readonly escalationId: string;
+  readonly orderId?: string | undefined;
   readonly onSubmit: (
     escalationId: string,
     input: TicketConfirmationInput,
   ) => Promise<{ ticketId: string }>;
 }
 
-export function TicketConfirmation({ escalationId, onSubmit }: Props) {
+export function TicketConfirmation({ escalationId, orderId, onSubmit }: Props) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [addedDetail, setAddedDetail] = useState("");
   const [includeTranscript, setIncludeTranscript] = useState(false);
+  const [includeOrderContext, setIncludeOrderContext] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +42,9 @@ export function TicketConfirmation({ escalationId, onSubmit }: Props) {
             name,
             addedDetail,
             includeTranscript,
+            ...(orderId && includeOrderContext
+              ? { includeOrderContext: true, orderId }
+              : {}),
           });
           setTicketId(result.ticketId);
         } catch (cause) {
@@ -90,6 +95,16 @@ export function TicketConfirmation({ escalationId, onSubmit }: Props) {
         />
         Include this chat so the team has the full context
       </label>
+      {orderId && (
+        <label class="nz-ticket-confirmation__consent">
+          <input
+            type="checkbox"
+            checked={includeOrderContext}
+            onChange={(event) => setIncludeOrderContext(event.currentTarget.checked)}
+          />
+          Include the selected order number, date, items, total, payment, fulfillment, and tracking details
+        </label>
+      )}
       {error && <p class="nz-ticket-confirmation__error" role="alert">{error}</p>}
       <button type="submit" disabled={submitting}>
         {submitting ? "Sending…" : "Send to the team"}

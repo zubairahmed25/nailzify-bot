@@ -87,6 +87,7 @@ function deps(opts: {
   reranker?: Reranker;
   catalogThrows?: boolean;
   onKnowledgeSearch?: (filter: Parameters<VectorStore["searchKnowledge"]>[2]) => void;
+  onProductSearch?: (filter: Parameters<VectorStore["searchProducts"]>[2]) => void;
 }) {
   const vectors: VectorStore = {
     upsert: async () => {},
@@ -94,7 +95,10 @@ function deps(opts: {
       opts.onKnowledgeSearch?.(filter);
       return opts.knowledge ?? [];
     },
-    searchProducts: async () => opts.candidates ?? [],
+    searchProducts: async (_vector, _topK, filter) => {
+      opts.onProductSearch?.(filter);
+      return opts.candidates ?? [];
+    },
     deleteByDocument: async () => {},
   };
 
@@ -278,6 +282,35 @@ describe("product search formatting", () => {
     );
 
     expect(outcome.content).toContain("No products matched");
+  });
+
+  it("does not hard filter by length when the catalog does not reliably store length", async () => {
+    const seen: Parameters<VectorStore["searchProducts"]>[2][] = [];
+    const unknownLength = product({ attributes: { ...attrs, length: null } });
+    const registry = deps({
+      candidates: [candidate],
+      products: [unknownLength],
+      onProductSearch: (filter) => seen.push(filter),
+    });
+
+    const outcome = await registry.execute(
+      call(TOOL_NAMES.searchProducts, { query: "short bridal nails", length: "short" }),
+      newTurnArtifacts(),
+    );
+
+    expect(seen[0]).not.toHaveProperty("length");
+    expect(outcome.content).toContain("could not confirm the requested length");
+  });
+
+  it("does not turn an empty semantic search into a catalog wide absence claim", async () => {
+    const registry = deps({ candidates: [], products: [] });
+
+    const outcome = await registry.execute(
+      call(TOOL_NAMES.searchProducts, { query: "press-on toenails" }),
+      newTurnArtifacts(),
+    );
+
+    expect(outcome.content).toContain("not proof that the store does not carry it");
   });
 });
 
@@ -466,7 +499,9 @@ describe("escalation", () => {
     expect(artifacts.escalationId).toBeTruthy();
     expect(artifacts.escalationReason).toBe("refund");
     expect(artifacts.escalationSummary).toBe("wants refund on #1234");
-    expect(outcome.content).toContain("do not attempt to resolve");
+    expect(outcome.content).toContain("No ticket exists yet");
+    expect(outcome.content).toContain("transcript is optional");
+    expect(outcome.content).not.toContain("will follow up");
   });
 });
 

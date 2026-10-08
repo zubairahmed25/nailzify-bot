@@ -17,6 +17,7 @@
 
 import * as cdk from "aws-cdk-lib";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
+import * as kms from "aws-cdk-lib/aws-kms";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import type { Construct } from "constructs";
@@ -46,6 +47,9 @@ export class DataStack extends cdk.Stack {
   readonly pineconeSecret: secretsmanager.Secret;
   readonly brevoApiKeySecret: secretsmanager.Secret;
   readonly brevoWebhookSecret: secretsmanager.Secret;
+  readonly resendApiKeySecret: secretsmanager.Secret;
+  readonly resendWebhookSecret: secretsmanager.Secret;
+  readonly customerOrderKey: kms.Key;
 
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
@@ -86,6 +90,16 @@ export class DataStack extends cdk.Stack {
       // you project, with its own write cost — ALL is rarely the right answer.
       projectionType: dynamodb.ProjectionType.INCLUDE,
       nonKeyAttributes: ["sessionId", "createdAt"],
+    });
+
+    // Buyer scoped Customer Account API tokens are short lived, but they are
+    // still credentials. A dedicated key keeps decrypt permission narrower
+    // than the table and makes access visible in CloudTrail.
+    this.customerOrderKey = new kms.Key(this, "CustomerOrderKey", {
+      alias: `alias/nailzify-${envName}-customer-orders`,
+      description: "Encrypts short lived Shopify customer order access tokens and PKCE verifiers.",
+      enableKeyRotation: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     // Backs "every admin-uploaded document, newest first" — originally
@@ -212,6 +226,11 @@ export class DataStack extends cdk.Stack {
       "brevo-webhook-secret",
       "Bearer token required on Brevo delivery and inbound webhook calls.",
     );
+    this.resendApiKeySecret = secret("resend-api-key", "Resend email API key.");
+    this.resendWebhookSecret = secret(
+      "resend-webhook-secret",
+      "Svix signing secret used to verify Resend webhook calls.",
+    );
 
     // ---- Outputs ----------------------------------------------------------
     new cdk.CfnOutput(this, "TableName", { value: this.table.tableName });
@@ -219,5 +238,8 @@ export class DataStack extends cdk.Stack {
     new cdk.CfnOutput(this, "TicketEmailBucketName", { value: this.ticketEmailBucket.bucketName });
     new cdk.CfnOutput(this, "BrevoApiKeySecretName", { value: this.brevoApiKeySecret.secretName });
     new cdk.CfnOutput(this, "BrevoWebhookSecretName", { value: this.brevoWebhookSecret.secretName });
+    new cdk.CfnOutput(this, "ResendApiKeySecretName", { value: this.resendApiKeySecret.secretName });
+    new cdk.CfnOutput(this, "ResendWebhookSecretName", { value: this.resendWebhookSecret.secretName });
+    new cdk.CfnOutput(this, "CustomerOrderKeyArn", { value: this.customerOrderKey.keyArn });
   }
 }

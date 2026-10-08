@@ -137,6 +137,23 @@ describe("selectRecommendations", () => {
     ]);
   });
 
+  it("ranks a confirmed length above a product whose length is unknown", () => {
+    const confirmed = product("confirmed", {
+      attributes: { ...baseAttributes, length: "short" },
+    });
+    const unknown = product("unknown", {
+      attributes: { ...baseAttributes, length: null },
+    });
+
+    const result = selectRecommendations([unknown, confirmed], { length: "short" });
+
+    expect(result.map((r) => r.product.id)).toEqual([
+      ProductId("confirmed"),
+      ProductId("unknown"),
+    ]);
+    expect(result[1]!.reasons).not.toContain("short length");
+  });
+
   it("scores against stated preferences only", () => {
     // A customer who states one preference and matches it should score highly,
     // not be penalised for the four things they never mentioned.

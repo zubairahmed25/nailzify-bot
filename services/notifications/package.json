@@ -3,15 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Reliable ticket email outbox, Brevo integration, and migration adapters.",
+  "description": "Reliable ticket email outbox and provider adapters.",
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.717.0",
+    "@aws-sdk/client-s3": "^3.717.0",
     "@aws-sdk/client-sesv2": "^3.717.0",
     "@aws-sdk/client-sqs": "^3.717.0",
     "@aws-sdk/lib-dynamodb": "^3.717.0",
-    "@aws-sdk/client-s3": "^3.717.0",
     "@nailzify/adapters": "*",
-    "mailparser": "^3.7.4"
+    "mailparser": "^3.7.4",
+    "svix": "^2.7.0"
   },
   "devDependencies": {
     "@types/mailparser": "^3.4.6"

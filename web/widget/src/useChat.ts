@@ -16,7 +16,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readSse } from "./sse.js";
-import type { ChatMessage, TicketConfirmationInput } from "./types.js";
+import type {
+  ChatMessage,
+  CustomerOrderDetail,
+  CustomerOrderState,
+  CustomerOrderSummary,
+  TicketConfirmationInput,
+} from "./types.js";
 import type { ServerQuickActionIntent } from "./quick-actions.js";
 import {
   loadPersistedState,
@@ -31,6 +37,7 @@ export { loadPersistedState, savePersistedState } from "./persistence.js";
 /** Shopify App Proxy path. Shopify forwards this to the Lambda with an HMAC. */
 const ENDPOINT = "/apps/nailzify-chat/message";
 const TICKET_ENDPOINT = "/apps/nailzify-chat/tickets";
+const ORDER_ENDPOINT = "/apps/nailzify-chat/customer-orders";
 
 export type Status = "idle" | "thinking" | "streaming" | "error";
 
@@ -40,15 +47,25 @@ export function useChat() {
   );
   const [status, setStatus] = useState<Status>("idle");
   const [toolActivity, setToolActivity] = useState<string | null>(null);
+  const [customerOrders, setCustomerOrders] = useState<CustomerOrderState>({ status: "idle" });
+  const [orderTimelineIndex, setOrderTimelineIndex] = useState<number | null>(null);
+  const [handoffOrderIds, setHandoffOrderIds] = useState<Readonly<Record<string, string>>>({});
 
   const sessionId = useRef<string>("");
   const abort = useRef<AbortController | null>(null);
+  const orderAbort = useRef<AbortController | null>(null);
+  const messagesRef = useRef(messages);
+
+  messagesRef.current = messages;
 
   if (!sessionId.current) sessionId.current = loadSessionId();
 
   // A generation still running after the widget unmounts bills Bedrock for
   // tokens nobody will read.
-  useEffect(() => () => abort.current?.abort(), []);
+  useEffect(() => () => {
+    abort.current?.abort();
+    orderAbort.current?.abort();
+  }, []);
 
   // Persisted on every change rather than on unload: `beforeunload` is
   // unreliable on mobile Safari, which is exactly where a customer taps a
@@ -57,9 +74,114 @@ export function useChat() {
     savePersistedState({ open: loadPersistedState().open, messages });
   }, [messages]);
 
-  const send = useCallback(async (text: string, quickAction?: ServerQuickActionIntent) => {
+  const postOrder = useCallback(async <T,>(path: string, body: Record<string, unknown>): Promise<T> => {
+    orderAbort.current?.abort();
+    const controller = new AbortController();
+    orderAbort.current = controller;
+    const response = await fetch(`${ORDER_ENDPOINT}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: sessionId.current, ...body }),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({})) as T & {
+      error?: string;
+      code?: string;
+    };
+    if (!response.ok) {
+      const error = new Error(payload.error ?? "Orders are temporarily unavailable.");
+      Object.assign(error, { code: payload.code, status: response.status });
+      throw error;
+    }
+    return payload;
+  }, []);
+
+  const loadRecentOrders = useCallback(async (timelineIndex?: number) => {
+    setOrderTimelineIndex((current) => timelineIndex ?? current ?? messagesRef.current.length);
+    setCustomerOrders({ status: "loading", message: "Finding your recent orders…" });
+    try {
+      const payload = await postOrder<{ readonly orders: readonly CustomerOrderSummary[] }>(
+        "/recent",
+        {},
+      );
+      setCustomerOrders(
+        payload.orders.length
+          ? { status: "list", orders: payload.orders }
+          : { status: "empty" },
+      );
+    } catch (cause) {
+      if ((cause as Error).name === "AbortError") return;
+      const error = cause as Error & { code?: string };
+      setCustomerOrders(
+        error.code === "authentication_required"
+          ? { status: "sign_in", message: error.message }
+          : { status: "error", message: error.message },
+      );
+    }
+  }, [postOrder]);
+
+  const startOrderAuthentication = useCallback(async () => {
+    setCustomerOrders({ status: "loading", message: "Opening secure sign in…" });
+    try {
+      const currentUrl = new URL(window.location.href);
+      currentUrl.searchParams.delete("order_auth");
+      const payload = await postOrder<{ readonly authorizationUrl: string }>("/auth/start", {
+        returnUrl: currentUrl.toString(),
+      });
+      window.location.assign(payload.authorizationUrl);
+    } catch (cause) {
+      if ((cause as Error).name === "AbortError") return;
+      setCustomerOrders({
+        status: "error",
+        message: (cause as Error).message || "Secure sign in is temporarily unavailable.",
+      });
+    }
+  }, [postOrder]);
+
+  const selectOrder = useCallback(async (orderId: string) => {
+    setCustomerOrders({ status: "loading", message: "Checking the latest order status…" });
+    try {
+      const payload = await postOrder<{ readonly order: CustomerOrderDetail }>("/detail", { orderId });
+      setCustomerOrders({ status: "detail", order: payload.order });
+    } catch (cause) {
+      if ((cause as Error).name === "AbortError") return;
+      const error = cause as Error & { code?: string };
+      setCustomerOrders(
+        error.code === "authentication_required"
+          ? { status: "sign_in", message: error.message }
+          : { status: "error", message: error.message },
+      );
+    }
+  }, [postOrder]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("order_auth");
+    if (!result) return;
+    url.searchParams.delete("order_auth");
+    window.history.replaceState(window.history.state, "", url.toString());
+    if (result === "success") {
+      void loadRecentOrders();
+    } else {
+      setOrderTimelineIndex((current) => current ?? messagesRef.current.length);
+      setCustomerOrders({
+        status: "sign_in",
+        message: result === "cancelled"
+          ? "Sign in was cancelled."
+          : result === "expired"
+            ? "That sign in expired. Please try again."
+            : "We couldn’t complete sign in. Please try again.",
+      });
+    }
+  }, [loadRecentOrders]);
+
+  const send = useCallback(async (
+    text: string,
+    quickAction?: ServerQuickActionIntent,
+    orderContextId?: string,
+  ): Promise<"chat" | "order_lookup"> => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed) return "chat";
 
     abort.current?.abort();
     const controller = new AbortController();
@@ -67,6 +189,7 @@ export function useChat() {
 
     const customerMessage: ChatMessage = { id: newId(), role: "customer", text: trimmed };
     const replyId = newId();
+    let outcome: "chat" | "order_lookup" = "chat";
 
     setMessages((prev) => [
       ...prev,
@@ -147,6 +270,21 @@ export function useChat() {
             updateReply({ text: event.reason, failed: true });
             setStatus("idle");
             break;
+
+          case "order_lookup":
+            outcome = "order_lookup";
+            const messagesWithoutPendingReply = messagesRef.current.filter(
+              (message) => message.id !== replyId,
+            );
+            setMessages(messagesWithoutPendingReply);
+            setStatus("idle");
+            setToolActivity(null);
+            await loadRecentOrders(messagesWithoutPendingReply.length);
+            break;
+        }
+
+        if (event.type === "done" && event.handoff && orderContextId) {
+          setHandoffOrderIds((current) => ({ ...current, [event.handoff!.id]: orderContextId }));
         }
       }
 
@@ -154,9 +292,10 @@ export function useChat() {
       // connection dropped mid-answer. Partial text is still worth keeping;
       // silently showing it as complete is what would be wrong.
       setStatus((current) => (current === "idle" ? current : "idle"));
+      return outcome;
     } catch (error) {
       // An abort is a deliberate user action, not a failure to report.
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return "chat";
 
       updateReply({
         text:
@@ -165,8 +304,9 @@ export function useChat() {
         failed: true,
       });
       setStatus("error");
+      return "chat";
     }
-  }, []);
+  }, [loadRecentOrders]);
 
   const addAssistantPrompt = useCallback((text: string) => {
     setMessages((prev) => [...prev, { id: newId(), role: "assistant", text }]);
@@ -194,5 +334,33 @@ export function useChat() {
     setToolActivity(null);
   }, []);
 
-  return { messages, status, toolActivity, send, addAssistantPrompt, submitTicket, stop };
+  const clearCustomerOrders = useCallback(() => {
+    orderAbort.current?.abort();
+    setCustomerOrders({ status: "idle" });
+    setOrderTimelineIndex(null);
+  }, []);
+
+  const contactSupportForOrder = useCallback(async (orderId: string) => {
+    setCustomerOrders({ status: "idle" });
+    setOrderTimelineIndex(null);
+    await send("I want to talk to a person about this order.", undefined, orderId);
+  }, [send]);
+
+  return {
+    messages,
+    status,
+    toolActivity,
+    customerOrders,
+    orderTimelineIndex,
+    send,
+    addAssistantPrompt,
+    submitTicket,
+    stop,
+    loadRecentOrders,
+    startOrderAuthentication,
+    selectOrder,
+    clearCustomerOrders,
+    contactSupportForOrder,
+    orderIdForEscalation: (escalationId: string) => handoffOrderIds[escalationId],
+  };
 }

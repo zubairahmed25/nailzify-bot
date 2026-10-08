@@ -119,8 +119,10 @@ export function createToolRegistry(deps: ToolRegistryDeps): ToolRegistry {
             artifacts.escalationReason = String(call.input["reason"] ?? "Human help requested");
             artifacts.escalationSummary = String(call.input["summary"] ?? "");
             return done(
-              "Handoff created. Tell the customer a member of the team will follow up, " +
-                "and do not attempt to resolve the issue yourself.",
+              "Show the support request form below. No ticket exists yet. Tell the customer " +
+                "to submit the form to create the request. Sharing the transcript is optional, " +
+                "and the customer may leave it unchecked. Do not say the request was submitted, " +
+                "flagged, or passed over, and do not promise a response before the form is submitted.",
             );
           }
 
@@ -203,9 +205,10 @@ async function runProductSearch(
   currency: Parameters<typeof toPreferences>[1],
 ): Promise<string> {
   const query = String(call.input["query"] ?? "");
+  const preferences = toPreferences(call.input, currency);
   const result = await searchProducts(deps, {
     query,
-    preferences: toPreferences(call.input, currency),
+    preferences,
   });
 
   if (result.recommendations.length === 0) {
@@ -213,9 +216,19 @@ async function runProductSearch(
     return result.allOutOfStock
       ? "Matching products exist but every one is currently out of stock. Tell the " +
           "customer, and offer to help them find an alternative."
-      : "No products matched. Tell the customer you couldn't find a match and ask " +
-          "what else might work for them. Do not invent products.";
+      : "No products matched this search. Tell the customer you couldn't find a match and ask " +
+          "what else might work for them. A semantic search is not an exhaustive catalog check, " +
+          "so this is not proof that the store does not carry it. Do not make a store-wide absence " +
+          "claim. Do not invent products.";
   }
+
+  const lengthNotice =
+    preferences.length &&
+    !result.recommendations.some((rec) => rec.product.attributes.length === preferences.length)
+      ? `<search_notice>I found possible style matches, but could not confirm the requested length ` +
+        `from the catalog data. Do not describe these products as ${preferences.length}. Explain ` +
+        `that their length is unconfirmed.</search_notice>\n`
+      : "";
 
   const entries = result.recommendations.map((rec) => {
     const p = rec.product;
@@ -239,7 +252,7 @@ async function runProductSearch(
     ].join("\n");
   });
 
-  return `<live_products>\n${entries.join("\n")}\n</live_products>`;
+  return `${lengthNotice}<live_products>\n${entries.join("\n")}\n</live_products>`;
 }
 
 async function runProductDetails(

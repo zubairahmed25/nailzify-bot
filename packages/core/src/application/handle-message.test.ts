@@ -84,7 +84,7 @@ function fakeRepo(initial?: Session, history: Message[] = []) {
 /** Records calls and returns canned tool output. */
 function fakeTools(
   responses: Record<string, string> = {},
-  opts: { escalateOn?: string; throwOn?: string } = {},
+  opts: { escalateOn?: string; throwOn?: string; productsOn?: Record<string, Product[]> } = {},
 ) {
   const calls: string[] = [];
   const toolCalls: ToolCall[] = [];
@@ -99,6 +99,10 @@ function fakeTools(
         artifacts.escalationId = call.id;
         artifacts.escalationReason = "refund request";
         artifacts.escalationSummary = "customer wants a refund";
+      }
+      for (const product of opts.productsOn?.[call.name] ?? []) {
+        artifacts.productIds.push(product.id);
+        artifacts.products.push(product);
       }
       if (opts.throwOn === call.name) {
         return { toolCallId: call.id, content: "lookup failed", isError: true, latencyMs: 5 };
@@ -129,7 +133,7 @@ function build(opts: {
   session?: Session;
   history?: Message[];
   toolResponses?: Record<string, string>;
-  toolOpts?: { escalateOn?: string; throwOn?: string };
+  toolOpts?: { escalateOn?: string; throwOn?: string; productsOn?: Record<string, Product[]> };
   maxToolHops?: number;
   clock?: Clock;
   command?: Partial<Parameters<ReturnType<typeof createHandleMessage>>[0]>;
@@ -377,6 +381,54 @@ describe("the tool loop", () => {
     expect(tokensOf(events)).toContain("can't check stock");
     expect(events.at(-1)?.type).toBe("done");
   });
+
+  it("shows cards only for products named in the final answer", async () => {
+    const attributes: ProductAttributes = {
+      kind: "nail-set",
+      tags: [],
+      shape: "square",
+      length: null,
+      finishes: ["gloss"],
+      occasions: [],
+      suitableFor: [],
+      colourNotes: [],
+      style: null,
+    };
+    const makeProduct = (id: string, title: string): Product => ({
+      id: ProductId(id),
+      handle: ProductHandle(id),
+      title,
+      description: "",
+      productType: "",
+      url: `https://example.com/products/${id}`,
+      imageUrl: null,
+      price: money(1099, "USD"),
+      available: true,
+      variants: [],
+      attributes,
+      fetchedAt: NOW,
+    });
+    const bella = makeProduct("bella", "Bella");
+    const luna = makeProduct("luna", "Luna");
+    const unrelated = makeProduct("remover", "Nail Remover");
+    const { run, repo } = build({
+      turns: [
+        [toolUse("t1", "search_products"), doneEvent("tool_use")],
+        [text("Bella and Luna are the best matches."), doneEvent()],
+      ],
+      toolOpts: { productsOn: { search_products: [bella, luna, unrelated] } },
+    });
+
+    const events = await run();
+    const done = events.at(-1);
+
+    expect(done?.type === "done" && done.products.map((product) => product.title)).toEqual([
+      "Bella",
+      "Luna",
+    ]);
+    expect(done?.type === "done" && done.productIds).toEqual([bella.id, luna.id]);
+    expect(repo.appended[0]?.[1]?.shownProductIds).toEqual([bella.id, luna.id]);
+  });
 });
 
 describe("the hop ceiling", () => {
@@ -458,6 +510,22 @@ describe("escalation", () => {
       turns: [[text("Let me connect you with the team."), doneEvent()]],
       toolOpts: { escalateOn: "escalate_to_human" },
       command: { text: "refund" },
+    });
+
+    const events = await run();
+    const done = events.at(-1);
+
+    expect(tools.calls).toEqual(["escalate_to_human"]);
+    expect(llm.seen[0]!.disableTools).toBe(true);
+    expect(done?.type === "done" && done.handoff).toBeTruthy();
+    expect(repo.session()!.escalated).toBe(true);
+  });
+
+  it("opens the handoff form when the customer requests a human without sharing the transcript", async () => {
+    const { run, repo, tools, llm } = build({
+      turns: [[text("Submit the form below. You can leave transcript sharing unchecked."), doneEvent()]],
+      toolOpts: { escalateOn: "escalate_to_human" },
+      command: { text: "I need human help, but I do not want my chat transcript shared." },
     });
 
     const events = await run();

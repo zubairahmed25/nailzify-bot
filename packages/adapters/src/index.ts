@@ -33,6 +33,10 @@ export {
   type ShopifyProductCatalogConfig,
 } from "./shopify/product-catalog.js";
 export {
+  createCustomerAccountClient,
+  type CustomerAccountClientConfig,
+} from "./shopify/customer-account-client.js";
+export {
   parseMetafields,
   type ParsedAttributes,
   type RawMetafields,
@@ -48,6 +52,10 @@ export {
   type DynamoTicketRepoConfig,
 } from "./dynamodb/ticket-repo.js";
 export {
+  createDynamoOrderAuthRepo,
+  type DynamoOrderAuthRepoConfig,
+} from "./dynamodb/order-auth-repo.js";
+export {
   createIngestionStateStore,
   type IngestionStateStore,
   type IngestionStateConfig,
@@ -59,4 +67,5 @@ export {
   type CachingSecretsProvider,
   type SecretsProviderConfig,
 } from "./aws/secrets.js";
+export { createKmsCipher, type KmsCipherConfig } from "./aws/kms-cipher.js";
 export { createPdfExtractor, isLikelyScanned } from "./pdf/extractor.js";

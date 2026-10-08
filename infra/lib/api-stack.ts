@@ -10,6 +10,7 @@ import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import type * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import type * as kms from "aws-cdk-lib/aws-kms";
 import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -39,6 +40,8 @@ export interface ApiStackProps extends cdk.StackProps {
   readonly pineconeSecret: secretsmanager.Secret;
   readonly brevoApiKeySecret: secretsmanager.Secret;
   readonly brevoWebhookSecret: secretsmanager.Secret;
+  readonly resendApiKeySecret: secretsmanager.Secret;
+  readonly resendWebhookSecret: secretsmanager.Secret;
   readonly shopDomain: string;
   readonly storefrontDomain: string;
   readonly pineconeIndex: string;
@@ -68,9 +71,14 @@ export interface ApiStackProps extends cdk.StackProps {
   readonly ticketEmailProvider: string;
   readonly brevoFromAddress: string;
   readonly brevoInboundSpamScoreMax: string;
+  readonly resendFromAddress: string;
   readonly adminAppUrl: string;
   readonly supportReplyDomain: string;
   readonly ticketEmailBucket: s3.Bucket;
+  readonly customerOrderKey: kms.Key;
+  readonly distributionDomain: string;
+  readonly customerOrderReturnOrigin: string;
+  readonly customerOrderLookupEnabled: boolean;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -168,6 +176,14 @@ export class ApiStack extends cdk.Stack {
         STOREFRONT_SECRET_ARN: props.storefrontSecret.secretArn,
         PINECONE_SECRET_ARN: props.pineconeSecret.secretArn,
         MERCHANT_SUPPORT_RECIPIENTS: props.merchantSupportRecipients,
+        SHOPIFY_API_KEY: props.shopifyApiKey,
+        CUSTOMER_ORDER_LOOKUP_ENABLED: String(props.customerOrderLookupEnabled),
+        CUSTOMER_ORDER_AUTH_CALLBACK_URL:
+          `https://${props.distributionDomain}/api/customer-orders/auth/callback`,
+        CUSTOMER_ORDER_AUTH_RETURN_URL: props.customerOrderReturnOrigin,
+        CUSTOMER_ORDER_SESSION_MINUTES: "15",
+        CUSTOMER_ORDER_MAX_RECENT: "5",
+        CUSTOMER_ORDER_KMS_KEY_ID: props.customerOrderKey.keyArn,
       },
 
       tracing: lambda.Tracing.ACTIVE,
@@ -191,6 +207,7 @@ export class ApiStack extends cdk.Stack {
     props.proxySecret.grantRead(chatFn);
     props.storefrontSecret.grantRead(chatFn);
     props.pineconeSecret.grantRead(chatFn);
+    props.customerOrderKey.grantEncryptDecrypt(chatFn);
 
     // Scoped to SPECIFIC models, not `bedrock:*` on `*`. An over-broad grant
     // would let a compromised function invoke anything in the account.
@@ -347,6 +364,8 @@ export class ApiStack extends cdk.Stack {
         TICKET_EMAIL_PROVIDER: props.ticketEmailProvider,
         BREVO_FROM_ADDRESS: props.brevoFromAddress,
         BREVO_API_KEY_SECRET_ARN: props.brevoApiKeySecret.secretArn,
+        RESEND_FROM_ADDRESS: props.resendFromAddress,
+        RESEND_API_KEY_SECRET_ARN: props.resendApiKeySecret.secretArn,
         SES_FROM_ADDRESS: props.sesFromAddress,
         SES_CONFIGURATION_SET: configurationSet.configurationSetName,
         ADMIN_APP_URL: props.adminAppUrl,
@@ -378,6 +397,7 @@ export class ApiStack extends cdk.Stack {
     }));
     props.proxySecret.grantRead(emailWorkerFn);
     props.brevoApiKeySecret.grantRead(emailWorkerFn);
+    props.resendApiKeySecret.grantRead(emailWorkerFn);
 
     const deliveryEventsFn = new nodejs.NodejsFunction(this, "TicketDeliveryEvents", {
       functionName: `nailzify-${envName}-ticket-delivery-events`,
@@ -456,6 +476,36 @@ export class ApiStack extends cdk.Stack {
     props.proxySecret.grantRead(brevoWebhookFn);
     props.brevoWebhookSecret.grantRead(brevoWebhookFn);
     const brevoWebhookUrl = brevoWebhookFn.addFunctionUrl({
+      authType: lambda.FunctionUrlAuthType.NONE,
+    });
+
+    const resendWebhookFn = new nodejs.NodejsFunction(this, "ResendTicketWebhooks", {
+      functionName: `nailzify-${envName}-resend-ticket-webhooks`,
+      entry: path.join(repoRoot, "services/notifications/src/resend-webhook.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(30),
+      bundling: { minify: true, sourceMap: true, target: "node22", externalModules: [] },
+      environment: {
+        TABLE_NAME: props.table.tableName,
+        PROXY_SECRET_ARN: props.proxySecret.secretArn,
+        RESEND_API_KEY_SECRET_ARN: props.resendApiKeySecret.secretArn,
+        RESEND_WEBHOOK_SECRET_ARN: props.resendWebhookSecret.secretArn,
+        MERCHANT_SUPPORT_RECIPIENTS: props.merchantSupportRecipients,
+      },
+      logGroup: new logs.LogGroup(this, "ResendTicketWebhooksLogs", {
+        logGroupName: `/aws/lambda/nailzify-${envName}-resend-ticket-webhooks`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    });
+    props.table.grantReadWriteData(resendWebhookFn);
+    props.proxySecret.grantRead(resendWebhookFn);
+    props.resendApiKeySecret.grantRead(resendWebhookFn);
+    props.resendWebhookSecret.grantRead(resendWebhookFn);
+    const resendWebhookUrl = resendWebhookFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
     });
 
@@ -673,6 +723,10 @@ export class ApiStack extends cdk.Stack {
     new cdk.CfnOutput(this, "BrevoInboundWebhookUrl", {
       value: `${brevoWebhookUrl.url}inbound`,
       description: `Create the Brevo inbound webhook for ${props.supportReplyDomain} at this URL.`,
+    });
+    new cdk.CfnOutput(this, "ResendWebhookUrl", {
+      value: resendWebhookUrl.url,
+      description: "Create one signed Resend webhook for delivery and received email events at this URL.",
     });
     new cdk.CfnOutput(this, "BrevoReplyMxPrimary", {
       value: "10 inbound1.sendinblue.com.",

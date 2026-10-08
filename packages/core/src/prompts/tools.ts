@@ -148,11 +148,13 @@ export const TOOLS: readonly ToolDefinition[] = [
   {
     name: TOOL_NAMES.escalate,
     description:
-      "Hand this conversation to a human agent. " +
+      "Offer the customer a form to create a support ticket for human help. " +
       "Call this for order-specific issues, refund requests, complaints, damaged or " +
       "incorrect deliveries, payment problems, or anything you cannot resolve from " +
-      "documentation. Do not attempt to resolve these yourself — you have no access to " +
-      "orders or accounts.",
+      "documentation. Also call it whenever the customer explicitly asks for a person, " +
+      "including when the customer declines to share the transcript. Do not attempt to " +
+      "resolve these yourself — you have no access to orders or accounts. No ticket exists " +
+      "until the customer submits the form, so never promise that the team will follow up yet.",
     inputSchema: {
       type: "object",
       properties: {
